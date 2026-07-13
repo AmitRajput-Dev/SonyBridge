@@ -67,56 +67,86 @@ struct ContentView: View {
     // MARK: - Connected
 
     private var connectedView: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            header
-            ambientCard
-            if model.mode == .ambientSound {
-                ambientLevelCard
-            }
-            equalizerCard
-            if let error = model.errorMessage {
-                Text(error)
-                    .font(.system(size: 12))
-                    .foregroundColor(.red.opacity(0.9))
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(20)
-    }
-
-    private var header: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(model.deviceName)
-                    .font(.system(size: 22, weight: .bold))
-                    .foregroundColor(.white)
-                HStack(spacing: 6) {
-                    Circle().fill(Theme.accent).frame(width: 7, height: 7)
-                    Text("Connected")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(Theme.secondary)
-                    if model.batteryLevel >= 0 {
-                        Text("·").foregroundColor(Theme.secondary)
-                        Image(systemName: model.batteryCharging ? "bolt.fill" : batterySymbol(model.batteryLevel))
-                            .font(.system(size: 12))
-                            .foregroundColor(model.batteryLevel <= 20 ? .red.opacity(0.9) : Theme.accent)
-                        Text("\(model.batteryLevel)%")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(Theme.secondary)
-                    }
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: 16) {
+                deviceHero
+                ambientCard
+                if model.mode == .ambientSound {
+                    ambientLevelCard
+                }
+                equalizerCard
+                if let error = model.errorMessage {
+                    Text(error)
+                        .font(.system(size: 12))
+                        .foregroundColor(.red.opacity(0.9))
                 }
             }
-            Spacer()
-            Button(action: model.disconnect) {
-                Image(systemName: "power")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(Theme.secondary)
-                    .frame(width: 34, height: 34)
-                    .background(Theme.card)
-                    .clipShape(Circle())
-            }
-            .buttonStyle(PlainButtonStyle())
+            .padding(20)
         }
+    }
+
+    private var deviceHero: some View {
+        VStack(spacing: 12) {
+            HStack {
+                Spacer()
+                Button(action: model.disconnect) {
+                    Image(systemName: "power")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(Theme.secondary)
+                        .frame(width: 32, height: 32)
+                        .background(Theme.card)
+                        .clipShape(Circle())
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+
+            // Product-style banner. Generic headphone graphic (device-specific Sony renders are
+            // copyrighted and can't be bundled) over a soft accent halo, mirroring Sony's app layout.
+            ZStack {
+                // Soft accent glow behind the product for depth.
+                Circle()
+                    .fill(
+                        RadialGradient(
+                            gradient: Gradient(colors: [Theme.accent.opacity(0.22), Theme.accent.opacity(0.0)]),
+                            center: .center, startRadius: 4, endRadius: 104
+                        )
+                    )
+                    .frame(width: 210, height: 210)
+
+                if let image = deviceImage() {
+                    // Background-removed product cutout floating on the dark UI.
+                    Image(nsImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 190, height: 190)
+                } else {
+                    Image(systemName: "headphones")
+                        .font(.system(size: 92, weight: .thin))
+                        .foregroundColor(.white)
+                }
+            }
+
+            Text(model.deviceName)
+                .font(.system(size: 24, weight: .bold))
+                .foregroundColor(.white)
+
+            HStack(spacing: 7) {
+                if model.batteryLevel >= 0 {
+                    Image(systemName: model.batteryCharging ? "bolt.fill" : batterySymbol(model.batteryLevel))
+                        .font(.system(size: 13))
+                        .foregroundColor(model.batteryLevel <= 20 ? .red.opacity(0.9) : Theme.accent)
+                    Text("\(model.batteryLevel)%")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(Theme.secondary)
+                } else {
+                    Circle().fill(Theme.accent).frame(width: 7, height: 7)
+                    Text("Connected")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(Theme.secondary)
+                }
+            }
+        }
+        .padding(.bottom, 4)
     }
 
     private var ambientCard: some View {
@@ -232,6 +262,12 @@ struct ContentView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         }
         .buttonStyle(PlainButtonStyle())
+    }
+
+    // Matches the connected device name to a bundled product image (e.g. "WH-CH720N" -> "wh-ch720n").
+    private func deviceImage() -> NSImage? {
+        let slug = model.deviceName.lowercased().replacingOccurrences(of: " ", with: "-")
+        return NSImage(named: slug)
     }
 
     private func batterySymbol(_ level: Int) -> String {
