@@ -61,9 +61,38 @@ interface built for those devices.
 > Only the WH-CH720N is hardware-verified. Other models share the same protocol family, so the basics
 > should work — but per-model quirks are untested. Reports and PRs for other devices are very welcome.
 
-## 🚀 Build & run
+## 📦 Install (macOS)
 
-### macOS (recommended — native SwiftUI app)
+### Homebrew
+
+```sh
+brew tap AmitRajput-Dev/tap
+brew install --cask sonybridge
+```
+
+Homebrew asks you to trust the tap the first time (`brew trust AmitRajput-Dev/tap`) — it's a third-party
+tap. The cask clears the Gatekeeper quarantine flag for you on install.
+
+### Direct download
+
+Grab `SonyBridge-macOS.zip` from the [latest release](https://github.com/AmitRajput-Dev/SonyBridge/releases/latest),
+unzip, and move **SonyBridge.app** to `/Applications`. The app is ad-hoc signed (not notarized — no paid
+Apple Developer account), so allow it once:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/SonyBridge.app
+```
+
+…or right-click the app → **Open** → **Open**.
+
+Then: **connect your headphones in macOS Bluetooth settings first**, open SonyBridge, and hit *Connect*.
+
+> 💡 Keep audio playing while you use the app — Sony headsets drop the Bluetooth control link when idle
+> to save power.
+
+## 🚀 Build from source
+
+### macOS (native SwiftUI app)
 
 Requires **Xcode 14+**.
 
@@ -72,11 +101,7 @@ git clone --recurse-submodules https://github.com/AmitRajput-Dev/SonyBridge.git
 open SonyBridge/Client/macos/SonyHeadphonesClient.xcodeproj
 ```
 
-Then ⌘R. On first launch, grant Bluetooth permission. **Connect your headphones in macOS Bluetooth
-settings first**, then hit *Connect headphones* in the app.
-
-> 💡 Keep audio playing while you use the app — Sony headsets drop the Bluetooth control link when idle
-> to save power.
+Then ⌘R.
 
 ### Windows / Linux (Dear ImGui UI, inherited from upstream)
 
