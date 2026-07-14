@@ -102,3 +102,11 @@ endif ()
 target_link_libraries(SonyHeadphonesClient
     PRIVATE Threads::Threads
 )
+
+if (WIN32 OR LINUX)
+    add_custom_command(TARGET SonyHeadphonesClient POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_CURRENT_SOURCE_DIR}/resources/devices"
+            "$<TARGET_FILE_DIR:SonyHeadphonesClient>/resources/devices"
+        COMMENT "Copying device hero images next to the binary")
+endif()
