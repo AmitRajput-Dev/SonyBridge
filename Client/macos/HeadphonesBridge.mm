@@ -86,6 +86,11 @@
     return _hp ? _hp->isBatteryCharging() : NO;
 }
 
+- (BOOL)hasDualBattery { return _hp && _hp->hasDualBattery(); }
+- (NSInteger)batteryLeft { return _hp ? _hp->getBatteryLeft() : -1; }
+- (NSInteger)batteryRight { return _hp ? _hp->getBatteryRight() : -1; }
+- (NSInteger)batteryCase { return _hp ? _hp->getBatteryCase() : -1; }
+
 - (NSInteger)eqPreset {
     return _hp ? (NSInteger)_hp->getEqualizerPreset() : 0;
 }
@@ -189,11 +194,18 @@ static BOOL SHCLooksLikeSonyHeadset(NSString *name) {
 
 - (void)refreshStatusWithCompletion:(void (^)(void))completion {
     if (!_hp || !self.connected) { completion(); return; }
+    Headphones *hp = _hp.get();
     // CRITICAL: the init/battery/EQ inquiries below use v2 opcodes. Opcode 0x22 is BATTERY_LEVEL_REQUEST
     // on v2 but POWER_OFF on v1 - sending it to a v1 device (e.g. WH-1000XM4) powers the headphones off.
-    // Never send these unless the device is confirmed v2.
-    if (_bt->getProtocolVersion() != SonyProtocolVersion::V2) { completion(); return; }
-    Headphones *hp = _hp.get();
+    // A v1 device still needs *some* valid handshake traffic right after connect or it drops/powers off on
+    // its own, so read its ambient state (read-only 66 02) instead of sending nothing.
+    if (_bt->getProtocolVersion() != SonyProtocolVersion::V2) {
+        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+            try { hp->requestAmbientState(); } catch (std::exception &exc) {}
+            dispatch_async(dispatch_get_main_queue(), ^{ completion(); });
+        });
+        return;
+    }
     // Reads run on the global queue (not the serial command queue) so they don't block quick user taps;
     // per-call the connector mutex still serializes actual I/O.
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
@@ -217,10 +229,11 @@ static BOOL SHCLooksLikeSonyHeadset(NSString *name) {
 }
 
 - (void)refreshDynamicWithCompletion:(void (^)(void))completion {
-    if (!_hp || !self.connected || _bt->getProtocolVersion() != SonyProtocolVersion::V2) { completion(); return; }
+    if (!_hp || !self.connected) { completion(); return; }
     Headphones *hp = _hp.get();
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         // The headphone's physical button only changes ambient/NC, so that's all we poll (keeps traffic low).
+        // requestAmbientState() is protocol-aware (v2 uses 66 17, v1 uses 66 02), so this is safe on both.
         try { hp->requestAmbientState(); } catch (std::exception &exc) {}
         dispatch_async(dispatch_get_main_queue(), ^{ completion(); });
     });

@@ -33,6 +33,10 @@ typedef NS_ENUM(NSInteger, SHCAmbientMode) {
 
 @property (nonatomic, readonly) NSInteger batteryLevel;   // -1 until known
 @property (nonatomic, readonly) BOOL batteryCharging;
+@property (nonatomic, readonly) BOOL hasDualBattery;      // TWS earbuds
+@property (nonatomic, readonly) NSInteger batteryLeft;    // -1 if n/a
+@property (nonatomic, readonly) NSInteger batteryRight;
+@property (nonatomic, readonly) NSInteger batteryCase;
 @property (nonatomic, readonly) NSInteger eqPreset;       // raw preset byte (EQ_PRESET)
 @property (nonatomic, readonly) BOOL supportsEqualizer;   // v2 devices only
 @property (nonatomic, readonly) NSInteger clearBass;      // -10..10

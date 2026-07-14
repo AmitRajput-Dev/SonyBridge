@@ -148,7 +148,14 @@ struct ContentView: View {
                 .foregroundColor(.white)
 
             HStack(spacing: 7) {
-                if model.batteryLevel >= 0 {
+                if model.hasDualBattery {
+                    Image(systemName: "battery.100")
+                        .font(.system(size: 13))
+                        .foregroundColor(Theme.accent)
+                    Text("L \(model.batteryLeft)%  R \(model.batteryRight)%")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(Theme.secondary)
+                } else if model.batteryLevel >= 0 {
                     Image(systemName: model.batteryCharging ? "bolt.fill" : batterySymbol(model.batteryLevel))
                         .font(.system(size: 13))
                         .foregroundColor(model.batteryLevel <= 20 ? .red.opacity(0.9) : Theme.accent)
@@ -388,7 +395,12 @@ struct ContentView: View {
                 .foregroundColor(.white)
                 .padding(.bottom, 10)
             aboutRow("Status", model.connected ? "Connected" : "Disconnected")
-            if model.batteryLevel >= 0 { aboutRow("Battery", "\(model.batteryLevel)%\(model.batteryCharging ? " (charging)" : "")") }
+            if model.hasDualBattery {
+                aboutRow("Battery L / R", "\(model.batteryLeft)% / \(model.batteryRight)%")
+                if model.batteryCase >= 0 { aboutRow("Case", "\(model.batteryCase)%") }
+            } else if model.batteryLevel >= 0 {
+                aboutRow("Battery", "\(model.batteryLevel)%\(model.batteryCharging ? " (charging)" : "")")
+            }
             if !model.codec.isEmpty { aboutRow("Codec", model.codec) }
             if !model.firmware.isEmpty { aboutRow("Firmware", model.firmware) }
             if !model.protocolVersion.isEmpty { aboutRow("Protocol", model.protocolVersion) }

@@ -22,6 +22,10 @@ final class HeadphonesModel: ObservableObject {
 
     @Published var batteryLevel = -1
     @Published var batteryCharging = false
+    @Published var hasDualBattery = false
+    @Published var batteryLeft = -1
+    @Published var batteryRight = -1
+    @Published var batteryCase = -1
     @Published var eqPreset = 0
     @Published var supportsEqualizer = false
     @Published var eqBands = [0, 0, 0, 0, 0]
@@ -67,6 +71,10 @@ final class HeadphonesModel: ObservableObject {
         bridge.refreshStatus {
             self.batteryLevel = self.bridge.batteryLevel
             self.batteryCharging = self.bridge.batteryCharging
+            self.hasDualBattery = self.bridge.hasDualBattery
+            self.batteryLeft = self.bridge.batteryLeft
+            self.batteryRight = self.bridge.batteryRight
+            self.batteryCase = self.bridge.batteryCase
             self.eqPreset = self.bridge.eqPreset
             self.clearBass = self.bridge.clearBass
             self.dsee = self.bridge.dsee

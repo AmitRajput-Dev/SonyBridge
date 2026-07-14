@@ -38,9 +38,14 @@ public:
 	void initDevice();
 
 	// Battery (v2 inquiry). getBatteryLevel() returns -1 until requestBattery() succeeds.
+	// For TWS earbuds requestBattery() also fills the per-earbud + case levels (hasDualBattery()).
 	void requestBattery();
 	int getBatteryLevel();
 	bool isBatteryCharging();
+	bool hasDualBattery();
+	int getBatteryLeft();   // -1 if n/a
+	int getBatteryRight();
+	int getBatteryCase();
 
 	// Equalizer (v2). requestEqualizer() reads current state; setEqualizerPreset() pushes a preset immediately.
 	void requestEqualizer();
@@ -92,6 +97,10 @@ private:
 
 	int _batteryLevel = -1;
 	bool _batteryCharging = false;
+	bool _hasDualBattery = false;
+	int _batteryLeft = -1;
+	int _batteryRight = -1;
+	int _batteryCase = -1;
 	EQ_PRESET _eqPreset = EQ_PRESET::OFF;
 	std::vector<int> _eqBands = { 0, 0, 0, 0, 0 };
 	int _eqClearBass = 0;

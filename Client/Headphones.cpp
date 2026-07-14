@@ -87,17 +87,36 @@ void Headphones::initDevice()
 
 void Headphones::requestBattery()
 {
-	// GET: 22 <type=00 single>  ->  RET: 23 <type> <level 0-100> <charging 0/1>
-	auto resp = this->_conn.sendCommandAndReadResponse(
-		{ (char)V2Command::BATTERY_GET, 0x00 },
-		V2Command::BATTERY_RET
-	);
-	if (resp.size() >= 4)
-	{
-		std::lock_guard guard(this->_propertyMtx);
-		this->_batteryLevel = (unsigned char)resp[2];
-		this->_batteryCharging = resp[3] == 1;
-	}
+	// Single battery (over-ear and most models): GET 22 00 -> RET 23 00 <level> <charging>
+	try {
+		auto resp = this->_conn.sendCommandAndReadResponse({ (char)V2Command::BATTERY_GET, 0x00 }, V2Command::BATTERY_RET, 0x00);
+		if (resp.size() >= 4) {
+			std::lock_guard guard(this->_propertyMtx);
+			this->_batteryLevel = (unsigned char)resp[2];
+			this->_batteryCharging = resp[3] == 1;
+			return; // found a single battery; don't waste time probing the TWS types
+		}
+	} catch (...) {}
+
+	// TWS earbuds: dual L/R (22 09 -> 23 09 <Llvl> <Lchg> <Rlvl> <Rchg>) and case (22 0a -> 23 0a <lvl> <chg>).
+	try {
+		auto resp = this->_conn.sendCommandAndReadResponse({ (char)V2Command::BATTERY_GET, 0x09 }, V2Command::BATTERY_RET, 0x09);
+		if (resp.size() >= 6) {
+			std::lock_guard guard(this->_propertyMtx);
+			this->_hasDualBattery = true;
+			this->_batteryLeft = (unsigned char)resp[2];
+			this->_batteryRight = (unsigned char)resp[4];
+			this->_batteryLevel = std::min(this->_batteryLeft, this->_batteryRight);
+		}
+	} catch (...) {}
+
+	try {
+		auto resp = this->_conn.sendCommandAndReadResponse({ (char)V2Command::BATTERY_GET, 0x0a }, V2Command::BATTERY_RET, 0x0a);
+		if (resp.size() >= 4) {
+			std::lock_guard guard(this->_propertyMtx);
+			this->_batteryCase = (unsigned char)resp[2];
+		}
+	} catch (...) {}
 }
 
 int Headphones::getBatteryLevel()
@@ -109,6 +128,11 @@ bool Headphones::isBatteryCharging()
 {
 	return this->_batteryCharging;
 }
+
+bool Headphones::hasDualBattery() { return this->_hasDualBattery; }
+int Headphones::getBatteryLeft() { return this->_batteryLeft; }
+int Headphones::getBatteryRight() { return this->_batteryRight; }
+int Headphones::getBatteryCase() { return this->_batteryCase; }
 
 void Headphones::requestEqualizer()
 {
@@ -220,19 +244,40 @@ void Headphones::setDsee(bool enabled)
 
 void Headphones::requestAmbientState()
 {
-	// GET: 66 17  ->  RET: 67 17 01 <effect> <settingType 0=NC/1=Ambient> <voice> <level>
-	auto resp = this->_conn.sendCommandAndReadResponse({ 0x66, 0x17 }, 0x67);
-	if (resp.size() >= 7)
+	// The NCASM inquired-type differs by protocol generation (v2=0x17, v1=0x02), and so does the reply
+	// layout. Sending the wrong one is what left v1 devices (WH-1000XM4) without valid handshake traffic.
+	auto protocolVersion = this->_conn.getProtocolVersion();
+	if (protocolVersion == SonyProtocolVersion::V2)
 	{
-		bool on = resp[3] != 0;
-		bool ambient = resp[4] != 0;
-		bool voice = resp[5] != 0;
-		int level = (unsigned char)resp[6];
-		std::lock_guard guard(this->_propertyMtx);
-		// Update both current and desired so the UI reflects reality and isChanged() stays false.
-		this->_ambientSoundControl.current = this->_ambientSoundControl.desired = on;
-		this->_asmLevel.current = this->_asmLevel.desired = ambient ? level : 0;
-		this->_focusOnVoice.current = this->_focusOnVoice.desired = voice;
+		// GET: 66 17  ->  RET: 67 17 01 <effect> <settingType 0=NC/1=Ambient> <voice> <level>
+		auto resp = this->_conn.sendCommandAndReadResponse({ 0x66, 0x17 }, 0x67);
+		if (resp.size() >= 7)
+		{
+			bool on = resp[3] != 0;
+			bool ambient = resp[4] != 0;
+			bool voice = resp[5] != 0;
+			int level = (unsigned char)resp[6];
+			std::lock_guard guard(this->_propertyMtx);
+			// Update both current and desired so the UI reflects reality and isChanged() stays false.
+			this->_ambientSoundControl.current = this->_ambientSoundControl.desired = on;
+			this->_asmLevel.current = this->_asmLevel.desired = ambient ? level : 0;
+			this->_focusOnVoice.current = this->_focusOnVoice.desired = voice;
+		}
+	}
+	else
+	{
+		// GET: 66 02  ->  RET: 67 02 <effect> <settingType> <dualSingle> <asmSettingType> <asmId> <asmLevel>
+		auto resp = this->_conn.sendCommandAndReadResponse({ 0x66, 0x02 }, 0x67);
+		if (resp.size() >= 8)
+		{
+			bool on = resp[2] != 0;
+			bool voice = resp[6] != 0;
+			int level = (unsigned char)resp[7];
+			std::lock_guard guard(this->_propertyMtx);
+			this->_ambientSoundControl.current = this->_ambientSoundControl.desired = on;
+			this->_asmLevel.current = this->_asmLevel.desired = (level == 255) ? 0 : level;
+			this->_focusOnVoice.current = this->_focusOnVoice.desired = voice;
+		}
 	}
 }
 
