@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="340" viewBox="0 0 1280 340" fill="none" role="img" aria-label="SonyBridge">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1280" y2="340" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0d0d10"/>
+      <stop offset="1" stop-color="#15151b"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(960 150) rotate(90) scale(280)">
+      <stop stop-color="#3b82f6" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#3b82f6" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="accent" x1="96" y1="120" x2="96" y2="210" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#60a5fa"/>
+      <stop offset="1" stop-color="#3b82f6"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1280" height="340" rx="20" fill="url(#bg)"/>
+  <rect width="1280" height="340" rx="20" fill="url(#glow)"/>
+
+  <!-- headphone glyph -->
+  <g transform="translate(120 170)" stroke="url(#accent)" stroke-width="9" stroke-linecap="round" fill="none">
+    <path d="M-46 6 A46 46 0 0 1 46 6"/>
+    <rect x="-58" y="4" width="26" height="46" rx="12" fill="#3b82f6" stroke="none"/>
+    <rect x="32" y="4" width="26" height="46" rx="12" fill="#3b82f6" stroke="none"/>
+  </g>
+
+  <text x="210" y="158" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="76" font-weight="800" fill="#f5f6f8" letter-spacing="-1">Sony<tspan fill="#60a5fa">Bridge</tspan></text>
+  <text x="212" y="206" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="27" font-weight="500" fill="#9aa4b2">Control your Sony headphones from your desktop.</text>
+
+  <g font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="19" font-weight="600" fill="#c7d0dc">
+    <rect x="212" y="236" width="118" height="40" rx="20" fill="#ffffff" fill-opacity="0.06"/>
+    <text x="271" y="262" text-anchor="middle">macOS</text>
+    <rect x="342" y="236" width="132" height="40" rx="20" fill="#ffffff" fill-opacity="0.06"/>
+    <text x="408" y="262" text-anchor="middle">Windows</text>
+    <rect x="486" y="236" width="104" height="40" rx="20" fill="#ffffff" fill-opacity="0.06"/>
+    <text x="538" y="262" text-anchor="middle">Linux</text>
+  </g>
+</svg>

@@ -1,24 +1,36 @@
 <div align="center">
 
-# 🎧 SonyBridge
-
-### Control your Sony headphones from your desktop — the way the mobile app won't let you.
-
-A modern, native **macOS** app (with cross-platform roots) to control Sony headphones over Bluetooth:
-**Noise Cancelling**, **Ambient Sound**, **Equalizer**, and **Battery** — including newer models
-like the **WH-CH720N** and **WH-1000XM4/XM5** that speak Sony's second-generation protocol.
+<img src="docs/banner.svg" alt="SonyBridge" width="100%">
 
 <br/>
 
-![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue)
-![UI](https://img.shields.io/badge/macOS%20UI-SwiftUI-orange)
-![Language](https://img.shields.io/badge/core-C%2B%2B20-00599C)
-![License](https://img.shields.io/badge/license-MIT-green)
-![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen)
+**An unofficial, open-source desktop app for Sony headphones — Noise Cancelling, Ambient Sound, EQ, DSEE and battery, without the phone.**
 
 <br/>
 
-<img src="docs/connected.png" width="360" alt="SonyBridge connected to WH-CH720N">
+[![Build](https://github.com/AmitRajput-Dev/SonyBridge/actions/workflows/cmake.yml/badge.svg)](https://github.com/AmitRajput-Dev/SonyBridge/actions/workflows/cmake.yml)
+[![Release](https://img.shields.io/github/v/release/AmitRajput-Dev/SonyBridge?include_prereleases&sort=semver)](https://github.com/AmitRajput-Dev/SonyBridge/releases)
+[![Downloads](https://img.shields.io/github/downloads/AmitRajput-Dev/SonyBridge/total?color=success)](https://github.com/AmitRajput-Dev/SonyBridge/releases)
+[![Stars](https://img.shields.io/github/stars/AmitRajput-Dev/SonyBridge?style=flat)](https://github.com/AmitRajput-Dev/SonyBridge/stargazers)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+![Platforms](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue)
+
+<br/>
+
+[![Download for macOS](https://img.shields.io/badge/Download-macOS-000000?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/AmitRajput-Dev/SonyBridge/releases/latest)
+[![Windows Beta](https://img.shields.io/badge/Windows-Beta-0078D6?style=for-the-badge&logo=windows11&logoColor=white)](https://github.com/AmitRajput-Dev/SonyBridge/releases/tag/v0.4.0-beta1)
+[![Sponsor](https://img.shields.io/badge/Sponsor-%E2%9D%A4-EA4AAA?style=for-the-badge&logo=githubsponsors&logoColor=white)](https://github.com/sponsors/AmitRajput-Dev)
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-FFDD00?style=for-the-badge&logo=buymeacoffee&logoColor=black)](https://www.buymeacoffee.com/amitrajput)
+
+<br/>
+
+**[Features](#-features)** · **[Download](#-download)** · **[How it works](#-how-it-works)** · **[Contributing](#-contributing)** · **[Credits](#-credits)**
+
+<br/>
+
+<img src="docs/connected.png" width="330" alt="SonyBridge connected to a WH-CH720N">
+&nbsp;&nbsp;
+<img src="docs/disconnected.png" width="330" alt="SonyBridge disconnected state">
 
 </div>
 
@@ -32,24 +44,76 @@ reverse-engineered binary protocol — no phone required.
 
 The original [SonyHeadphonesClient](https://github.com/Plutoberth/SonyHeadphonesClient) only spoke Sony's
 **first-generation** protocol, so newer headsets (WH-CH720N, XM4/XM5, WF-series, LinkBuds…) just timed
-out on connect. SonyBridge adds full **second-generation ("v2") protocol** support and a clean SwiftUI
-interface built for those devices.
+out on connect. SonyBridge adds full **second-generation ("v2") protocol** support, a native SwiftUI app
+on macOS, and a matching modern UI on Windows/Linux.
 
 ## ✨ Features
 
 - 🎚️ **Ambient Sound Control** — Noise Cancelling · Ambient Sound (0–20 levels) · Off
 - 🗣️ **Focus on Voice** passthrough
-- 🎛️ **Equalizer** — presets *and* a full **Manual mode** with 5 bands + Clear Bass sliders
-- ✨ **DSEE** — toggle Sony's audio upscaling for compressed sources
-- 🔋 **Battery level** — live percentage, right in the header
-- 🖼️ **Device banner** — your headphones' official Sony product image
-- 🔌 **Auto-connect** — finds your already-paired Sony headset, no fiddly device picker
-- 🌑 **Native SwiftUI** — dark, minimal, and shaped after Sony's own app
-- 🧩 **Dual-protocol** — automatically detects and speaks either protocol generation
+- 🎛️ **Equalizer** — presets *and* a full **Manual mode** with 5 bands + Clear Bass
+- ✨ **DSEE** — Sony's audio upscaling for compressed sources
+- 🔋 **Battery level** — live percentage, including **per-earbud + case** for TWS models
+- 🎧 **Codec & firmware** readout
+- 🧩 **Capability-gated extras** — Auto Power-Off · Speak-to-Chat · Adaptive Volume (only shown when your device supports them)
+- 🖼️ **Device hero image** — your headphones' official Sony product render
+- 🔄 **Live button sync** — changes made on the headset reflect in the app
+- 🔌 **Auto-connect** to your already-paired Sony headset
+- 🧬 **Dual-protocol** — auto-detects and speaks either protocol generation
+- 🌑 **Modern UI** — dark, minimal, shaped after Sony's own app (SwiftUI on macOS, Dear ImGui on Windows/Linux)
 
-<div align="center">
-<img src="docs/disconnected.png" width="300" alt="Disconnected state">
-</div>
+## 📥 Download
+
+<table>
+<tr>
+<th>Platform</th><th>Get it</th><th>Notes</th>
+</tr>
+<tr>
+<td><b>macOS</b></td>
+<td>
+
+`brew tap AmitRajput-Dev/tap && brew install --cask sonybridge`
+
+or [**Download .app**](https://github.com/AmitRajput-Dev/SonyBridge/releases/latest)
+
+</td>
+<td>macOS 11+ · Apple Silicon &amp; Intel</td>
+</tr>
+<tr>
+<td><b>Windows</b></td>
+<td>
+
+[**Download Beta**](https://github.com/AmitRajput-Dev/SonyBridge/releases/tag/v0.4.0-beta1)
+
+</td>
+<td>🧪 Beta — testers wanted</td>
+</tr>
+<tr>
+<td><b>Linux</b></td>
+<td>
+
+[Build from source](#-build-from-source)
+
+</td>
+<td>GLFW/OpenGL build</td>
+</tr>
+</table>
+
+> 💡 After launching, **connect your headphones in your OS Bluetooth settings first**, then open SonyBridge and hit *Connect*. Keep audio playing — Sony headsets drop the control link when idle to save power.
+
+<details>
+<summary><b>macOS install notes (Gatekeeper)</b></summary>
+
+The app is ad-hoc signed (not notarized — no paid Apple Developer account). The Homebrew cask clears the
+quarantine flag for you. For a direct download, allow it once:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/SonyBridge.app
+```
+
+…or right-click the app → **Open** → **Open**. Homebrew also asks you to trust the third-party tap the
+first time (`brew trust AmitRajput-Dev/tap`).
+</details>
 
 ## 🎧 Supported headphones
 
@@ -60,42 +124,13 @@ interface built for those devices.
 | 🟡 **v2 earbuds** (controls work; battery format differs) | WF-1000XM4, WF-1000XM5, WF-C700N, LinkBuds S |
 | 🔵 **Legacy** (v1 protocol — NC/Ambient only) | WH-1000XM4, WH-1000XM3, WH-1000XM2, WH-XB900N, MDR-XB950BT |
 
-> Only the WH-CH720N is hardware-verified. Others share the same protocol family, so the basics should
-> work — per-model quirks are untested. Each supported model shows its official product image in the app.
-> Reports and PRs for other devices are very welcome.
-
-## 📦 Install (macOS)
-
-### Homebrew
-
-```sh
-brew tap AmitRajput-Dev/tap
-brew install --cask sonybridge
-```
-
-Homebrew asks you to trust the tap the first time (`brew trust AmitRajput-Dev/tap`) — it's a third-party
-tap. The cask clears the Gatekeeper quarantine flag for you on install.
-
-### Direct download
-
-Grab `SonyBridge-macOS.zip` from the [latest release](https://github.com/AmitRajput-Dev/SonyBridge/releases/latest),
-unzip, and move **SonyBridge.app** to `/Applications`. The app is ad-hoc signed (not notarized — no paid
-Apple Developer account), so allow it once:
-
-```sh
-xattr -dr com.apple.quarantine /Applications/SonyBridge.app
-```
-
-…or right-click the app → **Open** → **Open**.
-
-Then: **connect your headphones in macOS Bluetooth settings first**, open SonyBridge, and hit *Connect*.
-
-> 💡 Keep audio playing while you use the app — Sony headsets drop the Bluetooth control link when idle
-> to save power.
+> Only the WH-CH720N is fully hardware-verified. Others share the same protocol family, so the basics
+> should work — per-model quirks are untested. Reports and PRs for other devices are very welcome.
 
 ## 🚀 Build from source
 
-### macOS (native SwiftUI app)
+<details>
+<summary><b>macOS (native SwiftUI app)</b></summary>
 
 Requires **Xcode 14+**.
 
@@ -105,25 +140,24 @@ open SonyBridge/Client/macos/SonyHeadphonesClient.xcodeproj
 ```
 
 Then ⌘R.
-
-### Windows / Linux (Dear ImGui UI, inherited from upstream)
+</details>
 
 <details>
-<summary>Build instructions</summary>
+<summary><b>Windows / Linux (Dear ImGui UI)</b></summary>
 
 **Windows** (CMake + MSVC, from a Developer Command Prompt):
 ```sh
 cd Client && mkdir build && cd build
-cmake .. && cmake --build .
+cmake .. && cmake --build . --config Release
 ```
 
-**Linux** (`sudo apt install libbluetooth-dev libglew-dev libglfw3-dev libdbus-1-dev`):
+**Linux** (`sudo apt install libbluetooth-dev libglfw3-dev libdbus-1-dev`):
 ```sh
 cd Client && mkdir build && cd build
 cmake .. && cmake --build .
 ```
 
-The macOS SwiftUI interface is macOS-only; Windows/Linux use the original Dear ImGui GUI.
+Keep the built binary next to its `resources/` folder (device hero images load from `resources/devices/`).
 </details>
 
 ## 🔬 How it works
@@ -137,23 +171,40 @@ Sony headphones expose a vendor RFCOMM/SPP service. Commands are framed as:
 Two protocol generations exist, distinguished by their SDP service UUID:
 
 - **v1** — `96CC203E-…` — WH-1000XM3 and older
-- **v2** — `956C7B26-…` — WH-CH720N, Sony ULT WEAR (WH-ULT900N), XM4/XM5, WF-series, LinkBuds…
+- **v2** — `956C7B26-…` — WH-CH720N, Sony ULT WEAR, XM4/XM5, WF-series, LinkBuds…
 
-SonyBridge tries v1 first, falls back to v2, and remembers which succeeded. The v2 path adds the
-mandatory init handshake and per-frame host-ACK the newer devices require, plus battery and equalizer
-inquiry/response commands.
+SonyBridge tries v1 first, falls back to v2, and remembers which succeeded. The v2 path adds the mandatory
+init handshake and per-frame host-ACK the newer devices require, plus battery, EQ and DSEE inquiry commands.
+Protocol byte layouts were cross-referenced against
+[**GadgetBridge**](https://codeberg.org/Freeyourgadget/Gadgetbridge)'s Sony implementation.
 
-Protocol details were reverse-engineered by the community. Battery and EQ byte layouts in particular were
-cross-referenced against [**GadgetBridge**](https://codeberg.org/Freeyourgadget/Gadgetbridge)'s excellent
-Sony implementation.
+## 🤝 Contributing
+
+Contributions are very welcome — especially **device reports** and **testing on real hardware**.
+
+- 🐛 **Found a bug / have a device to report?** [Open an issue](https://github.com/AmitRajput-Dev/SonyBridge/issues/new) with your model and what happened.
+- 🧪 **Want to test?** Grab a [release](https://github.com/AmitRajput-Dev/SonyBridge/releases) and tell us how it behaves on your headset (a screenshot helps a lot).
+- 🔧 **Code?** Fork, branch, and open a PR against `main`. CI builds macOS, Windows and Linux on every PR.
 
 ## 🙏 Credits
 
 SonyBridge builds directly on the work of:
 
-- [**SonyHeadphonesClient**](https://github.com/Plutoberth/SonyHeadphonesClient) by Plutoberth, Mr-M33533K5, and contributors — the original cross-platform client and protocol foundation
+- [**SonyHeadphonesClient**](https://github.com/Plutoberth/SonyHeadphonesClient) by Plutoberth, Mr-M33533K5 &amp; contributors — the original cross-platform client and protocol foundation
 - [**semvis123**](https://github.com/semvis123) — the original macOS port
-- [**GadgetBridge**](https://codeberg.org/Freeyourgadget/Gadgetbridge) — reverse-engineered v2 protocol reference (battery, EQ)
+- [**GadgetBridge**](https://codeberg.org/Freeyourgadget/Gadgetbridge) — reverse-engineered v2 protocol reference
+
+**Community contributors & testers:**
+
+- [**@CrisProCrack**](https://github.com/CrisProCrack) — WH-1000XM4 (v1) connect fix
+- [**@Sebsdnl**](https://github.com/Sebsdnl) — Linux/Wayland crash fix &amp; ULT WEAR support
+- **u/More_Way_6784**, **@joelslaby** — WH-1000XM4 hardware testing
+
+## ❤️ Support
+
+If SonyBridge is useful to you, consider [**sponsoring**](https://github.com/sponsors/AmitRajput-Dev) or
+[**buying a coffee**](https://www.buymeacoffee.com/amitrajput) — it keeps the reverse-engineering going.
+Starring the repo helps too. ⭐
 
 ## ⚠️ Disclaimer
 
@@ -162,4 +213,4 @@ using a reverse-engineered protocol, for interoperability. Use at your own risk.
 
 ## 📄 License
 
-[MIT](LICENSE) — see the LICENSE file. Original copyright retained; see [Credits](#-credits).
+[MIT](LICENSE) — original copyright retained; see [Credits](#-credits).
