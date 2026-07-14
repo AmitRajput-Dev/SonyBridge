@@ -24,6 +24,9 @@ final class HeadphonesModel: ObservableObject {
     @Published var batteryCharging = false
     @Published var eqPreset = 0
     @Published var supportsEqualizer = false
+    @Published var eqBands = [0, 0, 0, 0, 0]
+    @Published var clearBass = 0
+    @Published var dsee = false
 
     @Published var errorMessage: String?
 
@@ -52,6 +55,9 @@ final class HeadphonesModel: ObservableObject {
             self.batteryLevel = self.bridge.batteryLevel
             self.batteryCharging = self.bridge.batteryCharging
             self.eqPreset = self.bridge.eqPreset
+            self.clearBass = self.bridge.clearBass
+            self.dsee = self.bridge.dsee
+            self.eqBands = (0..<5).map { self.bridge.equalizerBand(at: $0) }
         }
     }
 
@@ -59,6 +65,23 @@ final class HeadphonesModel: ObservableObject {
         eqPreset = preset
         errorMessage = nil
         bridge.setEqualizerPreset(preset) { ok, error in
+            if !ok, let error = error { self.errorMessage = error }
+        }
+    }
+
+    // Manual EQ (preset byte 0xA0 = 160). Called as the user drags a band or clear-bass slider.
+    func applyCustomEq() {
+        eqPreset = 0xA0
+        errorMessage = nil
+        bridge.setCustomEqualizerBass(clearBass, bands: eqBands.map { NSNumber(value: $0) }) { ok, error in
+            if !ok, let error = error { self.errorMessage = error }
+        }
+    }
+
+    func setDsee(_ on: Bool) {
+        dsee = on
+        errorMessage = nil
+        bridge.setDsee(on) { ok, error in
             if !ok, let error = error { self.errorMessage = error }
         }
     }

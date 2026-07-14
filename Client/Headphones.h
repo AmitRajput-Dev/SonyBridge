@@ -46,6 +46,15 @@ public:
 	void requestEqualizer();
 	EQ_PRESET getEqualizerPreset();
 	void setEqualizerPreset(EQ_PRESET preset);
+	// Custom (manual) EQ: 5 band values + clear bass, each in [-10, 10]. Selects the MANUAL preset.
+	void setEqualizerCustom(int clearBass, const std::vector<int>& bands);
+	int getClearBass();
+	int getEqualizerBand(int index); // 0..4
+
+	// DSEE / audio upsampling (v2).
+	void requestDsee();
+	bool getDsee();
+	void setDsee(bool enabled);
 
 	bool isChanged();
 	void setChanges();
@@ -59,6 +68,9 @@ private:
 	int _batteryLevel = -1;
 	bool _batteryCharging = false;
 	EQ_PRESET _eqPreset = EQ_PRESET::OFF;
+	std::vector<int> _eqBands = { 0, 0, 0, 0, 0 };
+	int _eqClearBass = 0;
+	bool _dsee = false;
 
 	std::mutex _propertyMtx;
 

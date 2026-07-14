@@ -33,6 +33,8 @@ typedef NS_ENUM(NSInteger, SHCAmbientMode) {
 @property (nonatomic, readonly) BOOL batteryCharging;
 @property (nonatomic, readonly) NSInteger eqPreset;       // raw preset byte (EQ_PRESET)
 @property (nonatomic, readonly) BOOL supportsEqualizer;   // v2 devices only
+@property (nonatomic, readonly) NSInteger clearBass;      // -10..10
+@property (nonatomic, readonly) BOOL dsee;                // DSEE / audio upsampling
 
 // Runs the native Bluetooth device picker (modal, main thread) and connects to the chosen device.
 // completion is called on the main thread.
@@ -51,6 +53,15 @@ typedef NS_ENUM(NSInteger, SHCAmbientMode) {
 
 // Pushes an equalizer preset (raw EQ_PRESET byte) to the device; completion on main.
 - (void)setEqualizerPreset:(NSInteger)preset completion:(void (^)(BOOL ok, NSString * _Nullable error))completion;
+
+// Current custom EQ band value (-10..10) for band 0..4.
+- (NSInteger)equalizerBandAtIndex:(NSInteger)index;
+
+// Pushes manual/custom EQ (clear bass + 5 bands, each -10..10) to the device.
+- (void)setCustomEqualizerBass:(NSInteger)bass bands:(NSArray<NSNumber *> *)bands completion:(void (^)(BOOL ok, NSString * _Nullable error))completion;
+
+// Toggles DSEE / audio upsampling.
+- (void)setDsee:(BOOL)enabled completion:(void (^)(BOOL ok, NSString * _Nullable error))completion;
 
 @end
 

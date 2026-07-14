@@ -39,6 +39,9 @@ namespace V2Command
 	inline constexpr unsigned char EQ_GET       = 0x56; // payload: 56 00
 	inline constexpr unsigned char EQ_RET       = 0x57; // reply: 57 00 <preset> 06 <bass+10> <b1..b5 +10>
 	inline constexpr unsigned char EQ_SET       = 0x58; // preset: 58 00 <preset> 00 ; custom: 58 00 A0 06 <bass+10> <b1..b5 +10>
+	inline constexpr unsigned char DSEE_GET     = 0xe6; // payload: e6 01
+	inline constexpr unsigned char DSEE_RET     = 0xe7; // reply: e7 01 <enabled 0/1>
+	inline constexpr unsigned char DSEE_SET     = 0xe8; // payload: e8 01 <enabled 0/1>
 }
 
 // v2 equalizer preset ids (byte value sent/received at EQ payload[2]).

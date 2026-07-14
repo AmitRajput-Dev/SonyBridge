@@ -118,6 +118,15 @@ void Headphones::requestEqualizer()
 	{
 		std::lock_guard guard(this->_propertyMtx);
 		this->_eqPreset = static_cast<EQ_PRESET>((unsigned char)resp[2]);
+		// When band data is present (57 00 <preset> 06 <bass+10> <b1..b5+10>), decode the -10..10 values.
+		if (resp.size() >= 10)
+		{
+			this->_eqClearBass = (unsigned char)resp[4] - 10;
+			for (int i = 0; i < 5; i++)
+			{
+				this->_eqBands[i] = (unsigned char)resp[5 + i] - 10;
+			}
+		}
 	}
 }
 
@@ -137,6 +146,73 @@ void Headphones::setEqualizerPreset(EQ_PRESET preset)
 	});
 	std::lock_guard guard(this->_propertyMtx);
 	this->_eqPreset = preset;
+}
+
+void Headphones::setEqualizerCustom(int clearBass, const std::vector<int>& bands)
+{
+	// SET custom: 58 00 A0 06 <clearBass+10> <b1..b5 +10>  (0xA0 = MANUAL preset; values clamped to [-10,10])
+	auto clamp = [](int v) { return (char)(unsigned char)(std::max(-10, std::min(10, v)) + 10); };
+	Buffer cmd = {
+		(char)V2Command::EQ_SET,
+		0x00,
+		(char)static_cast<unsigned char>(EQ_PRESET::MANUAL),
+		0x06,
+		clamp(clearBass)
+	};
+	for (int i = 0; i < 5; i++)
+	{
+		cmd.push_back(clamp(i < (int)bands.size() ? bands[i] : 0));
+	}
+	this->_conn.sendCommand(cmd);
+
+	std::lock_guard guard(this->_propertyMtx);
+	this->_eqPreset = EQ_PRESET::MANUAL;
+	this->_eqClearBass = clearBass;
+	for (int i = 0; i < 5; i++)
+	{
+		this->_eqBands[i] = i < (int)bands.size() ? bands[i] : 0;
+	}
+}
+
+int Headphones::getClearBass()
+{
+	return this->_eqClearBass;
+}
+
+int Headphones::getEqualizerBand(int index)
+{
+	return (index >= 0 && index < (int)this->_eqBands.size()) ? this->_eqBands[index] : 0;
+}
+
+void Headphones::requestDsee()
+{
+	// GET: e6 01  ->  RET: e7 01 <enabled 0/1>
+	auto resp = this->_conn.sendCommandAndReadResponse(
+		{ (char)V2Command::DSEE_GET, 0x01 },
+		V2Command::DSEE_RET
+	);
+	if (resp.size() >= 3)
+	{
+		std::lock_guard guard(this->_propertyMtx);
+		this->_dsee = resp[2] != 0;
+	}
+}
+
+bool Headphones::getDsee()
+{
+	return this->_dsee;
+}
+
+void Headphones::setDsee(bool enabled)
+{
+	// SET: e8 01 <enabled 0/1>
+	this->_conn.sendCommand({
+		(char)V2Command::DSEE_SET,
+		0x01,
+		(char)(enabled ? 0x01 : 0x00)
+	});
+	std::lock_guard guard(this->_propertyMtx);
+	this->_dsee = enabled;
 }
 
 bool Headphones::isChanged()

@@ -80,6 +80,18 @@
     return self.connected && _bt->getProtocolVersion() == SonyProtocolVersion::V2;
 }
 
+- (NSInteger)clearBass {
+    return _hp ? _hp->getClearBass() : 0;
+}
+
+- (BOOL)dsee {
+    return _hp ? _hp->getDsee() : NO;
+}
+
+- (NSInteger)equalizerBandAtIndex:(NSInteger)index {
+    return _hp ? _hp->getEqualizerBand((int)index) : 0;
+}
+
 static BOOL SHCLooksLikeSonyHeadset(NSString *name) {
     if (name.length == 0) return NO;
     NSArray<NSString *> *prefixes = @[@"WH-", @"WF-", @"WI-", @"MDR-", @"XB", @"LinkBuds"];
@@ -163,6 +175,7 @@ static BOOL SHCLooksLikeSonyHeadset(NSString *name) {
             }
             hp->requestBattery();
             hp->requestEqualizer();
+            hp->requestDsee();
         } catch (std::exception &exc) {
             // Best-effort: leave whatever state we did manage to read.
         }
@@ -195,6 +208,39 @@ static BOOL SHCLooksLikeSonyHeadset(NSString *name) {
         dispatch_async(dispatch_get_main_queue(), ^{
             completion(ok, error);
         });
+    });
+}
+
+- (void)setCustomEqualizerBass:(NSInteger)bass bands:(NSArray<NSNumber *> *)bands completion:(void (^)(BOOL, NSString * _Nullable))completion {
+    if (!_hp || !self.connected || _bt->getProtocolVersion() != SonyProtocolVersion::V2) {
+        completion(NO, @"Equalizer control isn't supported on this device yet.");
+        return;
+    }
+    std::vector<int> cbands;
+    for (NSNumber *n in bands) cbands.push_back((int)n.integerValue);
+    int cbass = (int)bass;
+    Headphones *hp = _hp.get();
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        NSString *error = nil; BOOL ok = YES;
+        try {
+            hp->setEqualizerCustom(cbass, cbands);
+        } catch (std::exception &exc) { ok = NO; error = @(exc.what()); }
+        dispatch_async(dispatch_get_main_queue(), ^{ completion(ok, error); });
+    });
+}
+
+- (void)setDsee:(BOOL)enabled completion:(void (^)(BOOL, NSString * _Nullable))completion {
+    if (!_hp || !self.connected || _bt->getProtocolVersion() != SonyProtocolVersion::V2) {
+        completion(NO, @"Not supported on this device.");
+        return;
+    }
+    Headphones *hp = _hp.get();
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        NSString *error = nil; BOOL ok = YES;
+        try {
+            hp->setDsee(enabled);
+        } catch (std::exception &exc) { ok = NO; error = @(exc.what()); }
+        dispatch_async(dispatch_get_main_queue(), ^{ completion(ok, error); });
     });
 }
 

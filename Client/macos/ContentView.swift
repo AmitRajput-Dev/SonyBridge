@@ -76,6 +76,7 @@ struct ContentView: View {
                 }
                 if model.supportsEqualizer {
                     equalizerCard
+                    dseeCard
                 }
                 if let error = model.errorMessage {
                     Text(error)
@@ -232,8 +233,10 @@ struct ContentView: View {
     private let eqPresets: [(String, Int)] = [
         ("Off", 0x00), ("Bright", 0x10), ("Excited", 0x11),
         ("Mellow", 0x12), ("Relaxed", 0x13), ("Vocal", 0x14),
-        ("Treble", 0x15), ("Bass", 0x16), ("Speech", 0x17)
+        ("Treble", 0x15), ("Bass", 0x16), ("Speech", 0x17),
+        ("Manual", 0xA0)
     ]
+    private let eqBandLabels = ["400", "1k", "2.5k", "6.3k", "16k"]
 
     private var equalizerCard: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -245,7 +248,48 @@ struct ContentView: View {
                     eqChip(preset.0, preset.1)
                 }
             }
+            if model.eqPreset == 0xA0 {
+                Divider().background(Theme.cardHi)
+                ForEach(0..<5, id: \.self) { i in
+                    eqBandRow(eqBandLabels[i], value: Binding(
+                        get: { Double(model.eqBands[i]) },
+                        set: { model.eqBands[i] = Int($0.rounded()); model.applyCustomEq() }
+                    ), display: model.eqBands[i])
+                }
+                eqBandRow("Bass", value: Binding(
+                    get: { Double(model.clearBass) },
+                    set: { model.clearBass = Int($0.rounded()); model.applyCustomEq() }
+                ), display: model.clearBass, accent: true)
+            }
         }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.card)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private func eqBandRow(_ label: String, value: Binding<Double>, display: Int, accent: Bool = false) -> some View {
+        HStack(spacing: 10) {
+            Text(label)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(accent ? Theme.accent : Theme.secondary)
+                .frame(width: 34, alignment: .leading)
+            Slider(value: value, in: -10...10, step: 1).accentColor(Theme.accent)
+            Text("\(display > 0 ? "+" : "")\(display)")
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundColor(.white)
+                .frame(width: 26, alignment: .trailing)
+        }
+    }
+
+    private var dseeCard: some View {
+        Toggle(isOn: Binding(get: { model.dsee }, set: { model.setDsee($0) })) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("DSEE").font(.system(size: 14, weight: .semibold)).foregroundColor(.white)
+                Text("Upscale compressed audio").font(.system(size: 11)).foregroundColor(Theme.secondary)
+            }
+        }
+        .toggleStyle(SwitchToggleStyle(tint: Theme.accent))
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.card)

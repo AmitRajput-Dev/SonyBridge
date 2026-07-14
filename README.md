@@ -39,8 +39,10 @@ interface built for those devices.
 
 - 🎚️ **Ambient Sound Control** — Noise Cancelling · Ambient Sound (0–20 levels) · Off
 - 🗣️ **Focus on Voice** passthrough
-- 🎛️ **Equalizer** — read the active preset and switch between Off, Bright, Excited, Mellow, Relaxed, Vocal, Treble, Bass & Speech
+- 🎛️ **Equalizer** — presets *and* a full **Manual mode** with 5 bands + Clear Bass sliders
+- ✨ **DSEE** — toggle Sony's audio upscaling for compressed sources
 - 🔋 **Battery level** — live percentage, right in the header
+- 🖼️ **Device banner** — your headphones' official Sony product image
 - 🔌 **Auto-connect** — finds your already-paired Sony headset, no fiddly device picker
 - 🌑 **Native SwiftUI** — dark, minimal, and shaped after Sony's own app
 - 🧩 **Dual-protocol** — automatically detects and speaks either protocol generation
