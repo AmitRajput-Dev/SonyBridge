@@ -55,7 +55,7 @@ interface built for those devices.
 
 | Status | Devices |
 |--------|---------|
-| ✅ **Verified** | WH-CH720N |
+| ✅ **Verified** | WH-CH720N, Sony ULT WEAR (WH-ULT900N) |
 | 🟢 **Expected** (v2, over-ear — NC/Ambient/battery/EQ) | WH-1000XM5, WH-1000XM6, WH-XB910N, WH-CH520 |
 | 🟡 **v2 earbuds** (controls work; battery format differs) | WF-1000XM4, WF-1000XM5, WF-C700N, LinkBuds S |
 | 🔵 **Legacy** (v1 protocol — NC/Ambient only) | WH-1000XM4, WH-1000XM3, WH-1000XM2, WH-XB900N, MDR-XB950BT |
@@ -137,7 +137,7 @@ Sony headphones expose a vendor RFCOMM/SPP service. Commands are framed as:
 Two protocol generations exist, distinguished by their SDP service UUID:
 
 - **v1** — `96CC203E-…` — WH-1000XM3 and older
-- **v2** — `956C7B26-…` — WH-CH720N, XM4/XM5, WF-series, LinkBuds…
+- **v2** — `956C7B26-…` — WH-CH720N, Sony ULT WEAR (WH-ULT900N), XM4/XM5, WF-series, LinkBuds…
 
 SonyBridge tries v1 first, falls back to v2, and remembers which succeeded. The v2 path adds the
 mandatory init handshake and per-frame host-ACK the newer devices require, plus battery and equalizer
