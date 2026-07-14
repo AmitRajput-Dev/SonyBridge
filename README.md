@@ -54,12 +54,13 @@ interface built for those devices.
 | Status | Devices |
 |--------|---------|
 | ✅ **Verified** | WH-CH720N |
-| 🟢 **Expected** (v2, over-ear, single battery) | WH-1000XM4, WH-1000XM5, WH-XB910N, WH-CH520 |
-| 🟡 **Partial** (v2 earbuds — controls work, battery format differs) | WF-1000XM4, WF-1000XM5, WF-C700N, LinkBuds S |
-| 🔵 **Legacy** (original v1 protocol) | WH-1000XM3, WH-1000XM2, WH-XB900N, MDR-XB950BT |
+| 🟢 **Expected** (v2, over-ear — NC/Ambient/battery/EQ) | WH-1000XM5, WH-1000XM6, WH-XB910N, WH-CH520 |
+| 🟡 **v2 earbuds** (controls work; battery format differs) | WF-1000XM4, WF-1000XM5, WF-C700N, LinkBuds S |
+| 🔵 **Legacy** (v1 protocol — NC/Ambient only) | WH-1000XM4, WH-1000XM3, WH-1000XM2, WH-XB900N, MDR-XB950BT |
 
-> Only the WH-CH720N is hardware-verified. Other models share the same protocol family, so the basics
-> should work — but per-model quirks are untested. Reports and PRs for other devices are very welcome.
+> Only the WH-CH720N is hardware-verified. Others share the same protocol family, so the basics should
+> work — per-model quirks are untested. Each supported model shows its official product image in the app.
+> Reports and PRs for other devices are very welcome.
 
 ## 📦 Install (macOS)
 
