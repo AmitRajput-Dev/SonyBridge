@@ -20,7 +20,7 @@
 [![Download for macOS](https://img.shields.io/badge/Download-macOS-000000?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/AmitRajput-Dev/SonyBridge/releases/latest)
 [![Windows Beta](https://img.shields.io/badge/Windows-Beta-0078D6?style=for-the-badge&logo=windows11&logoColor=white)](https://github.com/AmitRajput-Dev/SonyBridge/releases/tag/v0.4.0-beta1)
 [![Sponsor](https://img.shields.io/badge/Sponsor-%E2%9D%A4-EA4AAA?style=for-the-badge&logo=githubsponsors&logoColor=white)](https://github.com/sponsors/AmitRajput-Dev)
-[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-FFDD00?style=for-the-badge&logo=buymeacoffee&logoColor=black)](https://www.buymeacoffee.com/amitrajput)
+[![Donate via Razorpay](https://img.shields.io/badge/Donate-Razorpay-3395FF?style=for-the-badge&logo=razorpay&logoColor=white)](https://razorpay.me/@amitpratapsingrajput)
 
 <br/>
 
@@ -202,8 +202,11 @@ SonyBridge builds directly on the work of:
 
 ## ❤️ Support
 
-If SonyBridge is useful to you, consider [**sponsoring**](https://github.com/sponsors/AmitRajput-Dev) or
-[**buying a coffee**](https://www.buymeacoffee.com/amitrajput) — it keeps the reverse-engineering going.
+If SonyBridge is useful to you, consider supporting it — it keeps the reverse-engineering going:
+
+- 🌍 [**GitHub Sponsors**](https://github.com/sponsors/AmitRajput-Dev) — worldwide (cards, one-off or monthly)
+- 🇮🇳 [**Razorpay / UPI**](https://razorpay.me/@amitpratapsingrajput) — for supporters in India
+
 Starring the repo helps too. ⭐
 
 ## ⚠️ Disclaimer
