@@ -10,6 +10,9 @@
 #include "stb_image.h"
 
 #if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <windows.h>
 #elif defined(__linux__)
 #include <unistd.h>
