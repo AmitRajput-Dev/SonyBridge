@@ -32,6 +32,7 @@ typedef NS_ENUM(NSInteger, SHCAmbientMode) {
 @property (nonatomic, readonly) NSInteger batteryLevel;   // -1 until known
 @property (nonatomic, readonly) BOOL batteryCharging;
 @property (nonatomic, readonly) NSInteger eqPreset;       // raw preset byte (EQ_PRESET)
+@property (nonatomic, readonly) BOOL supportsEqualizer;   // v2 devices only
 
 // Runs the native Bluetooth device picker (modal, main thread) and connects to the chosen device.
 // completion is called on the main thread.

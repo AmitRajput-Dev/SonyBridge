@@ -23,6 +23,7 @@ final class HeadphonesModel: ObservableObject {
     @Published var batteryLevel = -1
     @Published var batteryCharging = false
     @Published var eqPreset = 0
+    @Published var supportsEqualizer = false
 
     @Published var errorMessage: String?
 
@@ -119,6 +120,7 @@ final class HeadphonesModel: ObservableObject {
         connected = bridge.connected
         deviceName = bridge.deviceName ?? ""
         supportsVpt = bridge.supportsVpt
+        supportsEqualizer = bridge.supportsEqualizer
         maxAmbientLevel = bridge.maxAmbientLevel
         mode = bridge.mode
         let level = bridge.ambientLevel

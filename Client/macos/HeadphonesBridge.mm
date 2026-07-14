@@ -76,6 +76,10 @@
     return _hp ? (NSInteger)_hp->getEqualizerPreset() : 0;
 }
 
+- (BOOL)supportsEqualizer {
+    return self.connected && _bt->getProtocolVersion() == SonyProtocolVersion::V2;
+}
+
 static BOOL SHCLooksLikeSonyHeadset(NSString *name) {
     if (name.length == 0) return NO;
     NSArray<NSString *> *prefixes = @[@"WH-", @"WF-", @"WI-", @"MDR-", @"XB", @"LinkBuds"];
@@ -146,6 +150,10 @@ static BOOL SHCLooksLikeSonyHeadset(NSString *name) {
 
 - (void)refreshStatusWithCompletion:(void (^)(void))completion {
     if (!_hp || !self.connected) { completion(); return; }
+    // CRITICAL: the init/battery/EQ inquiries below use v2 opcodes. Opcode 0x22 is BATTERY_LEVEL_REQUEST
+    // on v2 but POWER_OFF on v1 - sending it to a v1 device (e.g. WH-1000XM4) powers the headphones off.
+    // Never send these unless the device is confirmed v2.
+    if (_bt->getProtocolVersion() != SonyProtocolVersion::V2) { completion(); return; }
     Headphones *hp = _hp.get();
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         try {
@@ -167,6 +175,11 @@ static BOOL SHCLooksLikeSonyHeadset(NSString *name) {
 - (void)setEqualizerPreset:(NSInteger)preset completion:(void (^)(BOOL, NSString * _Nullable))completion {
     if (!_hp || !self.connected) {
         completion(NO, @"Not connected.");
+        return;
+    }
+    // The v2 EQ SET opcode differs from v1; only issue it on confirmed v2 devices.
+    if (_bt->getProtocolVersion() != SonyProtocolVersion::V2) {
+        completion(NO, @"Equalizer control isn't supported on this device yet.");
         return;
     }
     Headphones *hp = _hp.get();

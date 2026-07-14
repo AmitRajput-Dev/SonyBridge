@@ -74,7 +74,9 @@ struct ContentView: View {
                 if model.mode == .ambientSound {
                     ambientLevelCard
                 }
-                equalizerCard
+                if model.supportsEqualizer {
+                    equalizerCard
+                }
                 if let error = model.errorMessage {
                     Text(error)
                         .font(.system(size: 12))
