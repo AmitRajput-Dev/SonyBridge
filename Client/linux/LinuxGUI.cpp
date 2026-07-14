@@ -2,7 +2,6 @@
 #include "imgui.h"
 #include "backends/imgui_impl_glfw.h"
 #include "backends/imgui_impl_opengl3.h"
-#include <GL/glew.h>
 #include <GLFW/glfw3.h>
 #include <stdio.h>
 #include "Constants.h"
@@ -28,9 +27,11 @@ void EnterGUIMainLoop(BluetoothWrapper bt)
     if (!glfwInit())
         return;
 
-    const char *glsl_version = "#version 130";
+    const char *glsl_version = "#version 150";
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 
     // Create window with graphics context
     GLFWwindow *window = glfwCreateWindow(GUI_WIDTH, GUI_HEIGHT, APP_NAME, NULL, NULL);
@@ -39,13 +40,6 @@ void EnterGUIMainLoop(BluetoothWrapper bt)
 
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1); // Enable vsync
-
-    bool err = glewInit() != GLEW_OK;
-    if (err)
-    {
-        fprintf(stderr, "Failed to initialize OpenGL loader!\n");
-        return;
-    }
 
     ImGuiIO &io = ImGui::GetIO();
     (void)io;

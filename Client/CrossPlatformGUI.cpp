@@ -1,4 +1,4 @@
-﻿#include "CrossPlatformGUI.h"
+#include "CrossPlatformGUI.h"
 
 bool CrossPlatformGUI::performGUIPass()
 {
@@ -78,7 +78,8 @@ void CrossPlatformGUI::_drawDeviceDiscovery()
 			int temp = 0;
 			for (const auto& device : connectedDevices)
 			{
-				ImGui::RadioButton(device.name.c_str(), &selectedDevice, temp++);
+				std::string label = (device.name.empty() ? "Unknown Device" : device.name) + "##" + device.mac;
+				ImGui::RadioButton(label.c_str(), &selectedDevice, temp++);
 			}
 
 			ImGui::Spacing();

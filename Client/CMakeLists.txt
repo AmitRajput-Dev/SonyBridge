@@ -1,5 +1,5 @@
+cmake_minimum_required(VERSION 3.5)
 project(SonyHeadphonesClient)
-cmake_minimum_required(VERSION 3.1 FATAL_ERROR)
 
 set(CMAKE_CXX_STANDARD 20)
 
@@ -59,16 +59,14 @@ if (LINUX)
 	
     find_package(DBus REQUIRED)
 
-    find_package(GLEW REQUIRED)
-
     find_package(glfw3 REQUIRED)
 
     find_package(OpenGL REQUIRED)
 
-    if ((NOT DBUS_FOUND) OR (NOT GLEW_FOUND) OR (NOT glfw3_FOUND) OR (NOT OPENGL_FOUND))
+    if ((NOT DBUS_FOUND) OR (NOT glfw3_FOUND) OR (NOT OPENGL_FOUND))
         message ( FATAL_ERROR 
         "Didn't find one of the packages. For Debian based systems, use:"
-        "sudo apt install libbluetooth-dev libglew-dev libglfw3-dev libdbus-1-dev" )
+        "sudo apt install libbluetooth-dev libglfw3-dev libdbus-1-dev" )
     endif ()
 
     target_include_directories(SonyHeadphonesClient
@@ -78,7 +76,6 @@ if (LINUX)
 
     target_link_libraries(SonyHeadphonesClient
         PRIVATE ${DBUS_LIBRARIES}
-        GLEW::GLEW 
         glfw
         bluetooth
         OpenGL::GL
