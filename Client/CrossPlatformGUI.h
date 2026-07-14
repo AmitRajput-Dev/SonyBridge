@@ -13,6 +13,8 @@
 
 #include <future>
 #include <array>
+#include <map>
+#include <string>
 
 constexpr auto GUI_MAX_MESSAGES = 5;
 constexpr auto GUI_HEIGHT = 660;
@@ -56,6 +58,11 @@ private:
 	void _endCard();
 	void _cardTitle(const char* title);
 
+	// Device hero image (loaded from resources/devices/<slug>.png, uploaded via ImGui's 1.92 texture API).
+	struct DeviceTexture { ImTextureRef ref; int w = 0; int h = 0; bool ok = false; };
+	const DeviceTexture& _deviceTexture(const std::string& name);
+	std::string _resourceBase();
+
 	bool _isV2() { return _bt.getProtocolVersion() == SonyProtocolVersion::V2; }
 
 	BluetoothDevice _connectedDevice;
@@ -87,6 +94,8 @@ private:
 	bool _uiAdaptiveVolume = false;
 	int _uiSoundPosition = 0;
 	int _uiVptType = 0;
+
+	std::map<std::string, DeviceTexture> _deviceTextures;
 };
 
 template <typename F>

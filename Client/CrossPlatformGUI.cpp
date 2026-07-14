@@ -2,6 +2,18 @@
 
 #include <string>
 #include <vector>
+#include <algorithm>
+#include <cctype>
+
+#define STB_IMAGE_IMPLEMENTATION
+#define STBI_ONLY_PNG
+#include "stb_image.h"
+
+#if defined(_WIN32)
+#include <windows.h>
+#elif defined(__linux__)
+#include <unistd.h>
+#endif
 
 bool CrossPlatformGUI::performGUIPass()
 {
@@ -237,9 +249,92 @@ void CrossPlatformGUI::_syncUIFromHeadphones()
 	this->_uiAdaptiveVolume = this->_headphones.getAdaptiveVolume();
 }
 
+std::string CrossPlatformGUI::_resourceBase()
+{
+#if defined(_WIN32)
+	char buf[MAX_PATH];
+	DWORD n = GetModuleFileNameA(NULL, buf, MAX_PATH);
+	std::string p(buf, n > 0 ? n : 0);
+	auto s = p.find_last_of("\\/");
+	return s == std::string::npos ? std::string(".") : p.substr(0, s);
+#elif defined(__linux__)
+	char buf[4096];
+	ssize_t n = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
+	if (n <= 0) return ".";
+	buf[n] = '\0';
+	std::string p(buf);
+	auto s = p.find_last_of('/');
+	return s == std::string::npos ? std::string(".") : p.substr(0, s);
+#else
+	return ".";
+#endif
+}
+
+const CrossPlatformGUI::DeviceTexture& CrossPlatformGUI::_deviceTexture(const std::string& name)
+{
+	std::string slug = name;
+	std::transform(slug.begin(), slug.end(), slug.begin(), [](unsigned char ch) { return (char)std::tolower(ch); });
+	std::replace(slug.begin(), slug.end(), ' ', '-');
+
+	auto it = this->_deviceTextures.find(slug);
+	if (it != this->_deviceTextures.end())
+		return it->second;
+
+	DeviceTexture out;   // ok == false by default; cached even on failure so we don't retry every frame.
+
+	const std::string base = this->_resourceBase();
+	const std::string candidates[] = {
+		base + "/resources/devices/" + slug + ".png",
+		base + "/" + slug + ".png",
+		"resources/devices/" + slug + ".png",
+	};
+
+	int w = 0, h = 0, comp = 0;
+	unsigned char* pixels = nullptr;
+	for (const auto& path : candidates)
+	{
+		pixels = stbi_load(path.c_str(), &w, &h, &comp, 4);
+		if (pixels) break;
+	}
+
+	if (pixels && w > 0 && h > 0)
+	{
+		ImTextureData* tex = IM_NEW(ImTextureData)();
+		tex->Create(ImTextureFormat_RGBA32, w, h);
+		memcpy(tex->GetPixels(), pixels, (size_t)w * h * 4);
+		tex->SetStatus(ImTextureStatus_WantCreate);
+		ImGui::GetPlatformIO().Textures.push_back(tex);
+
+		out.ref = tex->GetTexRef();
+		out.w = w;
+		out.h = h;
+		out.ok = true;
+	}
+	if (pixels)
+		stbi_image_free(pixels);
+
+	auto res = this->_deviceTextures.emplace(slug, out);
+	return res.first->second;
+}
+
 void CrossPlatformGUI::_drawStatusHeader()
 {
 	if (!this->_beginCard("##status")) { this->_endCard(); return; }
+
+	const DeviceTexture& hero = this->_deviceTexture(this->_connectedDevice.name);
+	if (hero.ok)
+	{
+		const float cardW = ImGui::GetContentRegionAvail().x;
+		const float maxH = 150.f;
+		float scale = std::min(cardW / (float)hero.w, maxH / (float)hero.h);
+		if (scale > 1.f) scale = 1.f;
+		const ImVec2 sz(hero.w * scale, hero.h * scale);
+		const float offx = (cardW - sz.x) * 0.5f;
+		if (offx > 0.f)
+			ImGui::SetCursorPosX(ImGui::GetCursorPosX() + offx);
+		ImGui::Image(hero.ref, sz);
+		ImGui::Spacing();
+	}
 
 	ImGui::Text("%s", this->_connectedDevice.name.empty() ? "Sony Headphones" : this->_connectedDevice.name.c_str());
 	ImGui::SameLine();
