@@ -18,6 +18,8 @@ typedef NS_ENUM(NSInteger, SHCAmbientMode) {
 
 @property (nonatomic, readonly) BOOL connected;
 @property (nonatomic, copy, readonly, nullable) NSString *deviceName;
+@property (nonatomic, copy, readonly, nullable) NSString *deviceMac;
+@property (nonatomic, copy, readonly, nullable) NSString *protocolVersionString; // "v1" / "v2"
 
 // Only meaningful while connected.
 @property (nonatomic, readonly) BOOL supportsVpt;        // v1 protocol devices only
@@ -35,6 +37,18 @@ typedef NS_ENUM(NSInteger, SHCAmbientMode) {
 @property (nonatomic, readonly) BOOL supportsEqualizer;   // v2 devices only
 @property (nonatomic, readonly) NSInteger clearBass;      // -10..10
 @property (nonatomic, readonly) BOOL dsee;                // DSEE / audio upsampling
+
+// Optional features (present only if the device answered the capability probe on connect).
+@property (nonatomic, readonly) BOOL hasAutoPowerOff;
+@property (nonatomic, readonly) NSInteger autoPowerOff;   // 0=Off,1=5m,2=30m,3=1h,4=3h,5=when taken off
+@property (nonatomic, readonly) BOOL hasFirmware;
+@property (nonatomic, copy, readonly, nullable) NSString *firmware;
+@property (nonatomic, readonly) BOOL hasCodec;
+@property (nonatomic, copy, readonly, nullable) NSString *codec;
+@property (nonatomic, readonly) BOOL hasSpeakToChat;
+@property (nonatomic, readonly) BOOL speakToChat;
+@property (nonatomic, readonly) BOOL hasAdaptiveVolume;
+@property (nonatomic, readonly) BOOL adaptiveVolume;
 
 // Runs the native Bluetooth device picker (modal, main thread) and connects to the chosen device.
 // completion is called on the main thread.
@@ -62,6 +76,14 @@ typedef NS_ENUM(NSInteger, SHCAmbientMode) {
 
 // Toggles DSEE / audio upsampling.
 - (void)setDsee:(BOOL)enabled completion:(void (^)(BOOL ok, NSString * _Nullable error))completion;
+
+- (void)setAutoPowerOff:(NSInteger)index completion:(void (^)(BOOL ok, NSString * _Nullable error))completion;
+- (void)setSpeakToChat:(BOOL)enabled completion:(void (^)(BOOL ok, NSString * _Nullable error))completion;
+- (void)setAdaptiveVolume:(BOOL)enabled completion:(void (^)(BOOL ok, NSString * _Nullable error))completion;
+
+// Re-reads the fast-changing state (ambient/NC, level, EQ, DSEE) so changes made with the headphone's
+// own button show up in the app. Called on a timer while connected.
+- (void)refreshDynamicWithCompletion:(void (^)(void))completion;
 
 @end
 

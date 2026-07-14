@@ -17,6 +17,7 @@ private enum Theme {
 @available(macOS 11.0, *)
 struct ContentView: View {
     @StateObject private var model = HeadphonesModel()
+    @State private var showAbout = false
 
     var body: some View {
         ZStack {
@@ -78,6 +79,9 @@ struct ContentView: View {
                     equalizerCard
                     dseeCard
                 }
+                if model.hasAdaptiveVolume || model.hasSpeakToChat || model.hasAutoPowerOff {
+                    settingsCard
+                }
                 if let error = model.errorMessage {
                     Text(error)
                         .font(.system(size: 12))
@@ -90,8 +94,18 @@ struct ContentView: View {
 
     private var deviceHero: some View {
         VStack(spacing: 12) {
-            HStack {
+            HStack(spacing: 10) {
                 Spacer()
+                Button(action: { showAbout = true }) {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(Theme.secondary)
+                        .frame(width: 32, height: 32)
+                        .background(Theme.card)
+                        .clipShape(Circle())
+                }
+                .buttonStyle(PlainButtonStyle())
+                .popover(isPresented: $showAbout, arrowEdge: .bottom) { aboutView }
                 Button(action: model.disconnect) {
                     Image(systemName: "power")
                         .font(.system(size: 14, weight: .semibold))
@@ -145,6 +159,12 @@ struct ContentView: View {
                     Circle().fill(Theme.accent).frame(width: 7, height: 7)
                     Text("Connected")
                         .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(Theme.secondary)
+                }
+                if !model.codec.isEmpty {
+                    Text("·").foregroundColor(Theme.secondary)
+                    Text(model.codec)
+                        .font(.system(size: 12, weight: .semibold))
                         .foregroundColor(Theme.secondary)
                 }
             }
@@ -308,6 +328,88 @@ struct ContentView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         }
         .buttonStyle(PlainButtonStyle())
+    }
+
+    private let apoOptions = ["Off", "5 min", "30 min", "1 hour", "3 hours", "When taken off"]
+
+    private var settingsCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Settings")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundColor(.white)
+            if model.hasAdaptiveVolume {
+                settingToggle("Adaptive Volume", "Auto-adjust volume by surroundings",
+                              on: model.adaptiveVolume) { model.setAdaptiveVolume($0) }
+            }
+            if model.hasSpeakToChat {
+                settingToggle("Speak-to-Chat", "Pause music when you talk",
+                              on: model.speakToChat) { model.setSpeakToChat($0) }
+            }
+            if model.hasAutoPowerOff {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Auto Power-Off").font(.system(size: 14, weight: .semibold)).foregroundColor(.white)
+                        Text("Turn off when idle").font(.system(size: 11)).foregroundColor(Theme.secondary)
+                    }
+                    Spacer()
+                    Picker("", selection: Binding(
+                        get: { model.autoPowerOff },
+                        set: { model.setAutoPowerOff($0) }
+                    )) {
+                        ForEach(0..<apoOptions.count, id: \.self) { i in Text(apoOptions[i]).tag(i) }
+                    }
+                    .pickerStyle(MenuPickerStyle())
+                    .frame(width: 130)
+                    .accentColor(Theme.accent)
+                }
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.card)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private func settingToggle(_ title: String, _ subtitle: String, on: Bool, action: @escaping (Bool) -> Void) -> some View {
+        Toggle(isOn: Binding(get: { on }, set: { action($0) })) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.system(size: 14, weight: .semibold)).foregroundColor(.white)
+                Text(subtitle).font(.system(size: 11)).foregroundColor(Theme.secondary)
+            }
+        }
+        .toggleStyle(SwitchToggleStyle(tint: Theme.accent))
+    }
+
+    // ⋯ About / device info popover.
+    private var aboutView: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(model.deviceName)
+                .font(.system(size: 15, weight: .bold))
+                .foregroundColor(.white)
+                .padding(.bottom, 10)
+            aboutRow("Status", model.connected ? "Connected" : "Disconnected")
+            if model.batteryLevel >= 0 { aboutRow("Battery", "\(model.batteryLevel)%\(model.batteryCharging ? " (charging)" : "")") }
+            if !model.codec.isEmpty { aboutRow("Codec", model.codec) }
+            if !model.firmware.isEmpty { aboutRow("Firmware", model.firmware) }
+            if !model.protocolVersion.isEmpty { aboutRow("Protocol", model.protocolVersion) }
+            if !model.deviceMac.isEmpty { aboutRow("Bluetooth", model.deviceMac) }
+            Divider().background(Theme.cardHi).padding(.vertical, 10)
+            Text("SonyBridge · not affiliated with Sony")
+                .font(.system(size: 10))
+                .foregroundColor(Theme.secondary.opacity(0.7))
+        }
+        .padding(18)
+        .frame(width: 260)
+        .background(Theme.card)
+    }
+
+    private func aboutRow(_ label: String, _ value: String) -> some View {
+        HStack {
+            Text(label).font(.system(size: 12)).foregroundColor(Theme.secondary)
+            Spacer()
+            Text(value).font(.system(size: 12, weight: .medium)).foregroundColor(.white)
+        }
+        .padding(.vertical, 3)
     }
 
     // Matches the connected device name to a bundled product image (e.g. "WH-CH720N" -> "wh-ch720n").

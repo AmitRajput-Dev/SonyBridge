@@ -42,6 +42,19 @@ namespace V2Command
 	inline constexpr unsigned char DSEE_GET     = 0xe6; // payload: e6 01
 	inline constexpr unsigned char DSEE_RET     = 0xe7; // reply: e7 01 <enabled 0/1>
 	inline constexpr unsigned char DSEE_SET     = 0xe8; // payload: e8 01 <enabled 0/1>
+	inline constexpr unsigned char FW_GET       = 0x04; // payload: 04 02  -> RET 05 02 <ascii version...>
+	inline constexpr unsigned char FW_RET       = 0x05;
+	inline constexpr unsigned char CODEC_GET    = 0x12; // payload: 12 02  -> RET 13 02 <codec>
+	inline constexpr unsigned char CODEC_RET    = 0x13;
+	inline constexpr unsigned char APO_GET      = 0x26; // auto power off. GET 26 05 -> RET 27 05 <c0> <c1>
+	inline constexpr unsigned char APO_RET      = 0x27;
+	inline constexpr unsigned char APO_SET      = 0x28; // SET 28 05 <c0> <c1>
+	// Multiplexed button-mode family: sub-type byte selects the feature (0x0a=adaptive volume, 0x0c=speak-to-chat).
+	inline constexpr unsigned char BTNMODE_GET  = 0xf6; // GET f6 <sub> -> RET f7 <sub> ...
+	inline constexpr unsigned char BTNMODE_RET  = 0xf7;
+	inline constexpr unsigned char BTNMODE_SET  = 0xf8; // SET f8 <sub> <value...>
+	inline constexpr unsigned char SUB_ADAPTIVE_VOLUME = 0x0a;
+	inline constexpr unsigned char SUB_SPEAK_TO_CHAT   = 0x0c;
 }
 
 // v2 equalizer preset ids (byte value sent/received at EQ payload[2]).

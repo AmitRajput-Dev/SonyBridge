@@ -169,10 +169,15 @@ void MacOSBluetoothConnector::connect(const std::string& addrStr){
 
 int MacOSBluetoothConnector::recv(char* buf, size_t length)
 {
-    // wait for newly received data
+    // wait for newly received data, but time out so an unanswered inquiry (probing an unsupported
+    // feature) or a dropped link doesn't block the caller forever.
     std::unique_lock<std::mutex> g(receiveDataMutex);
-    receiveDataConditionVariable.wait(g, [this]{ return !receivedBytes.empty(); });
-    
+    bool gotData = receiveDataConditionVariable.wait_for(g, std::chrono::milliseconds(2500),
+        [this]{ return !receivedBytes.empty(); });
+    if (!gotData) {
+        throw RecoverableException("recv timed out", false);
+    }
+
     // fill the buf with the new data
     std::vector<unsigned char> receivedVector = receivedBytes.front();
     receivedBytes.pop_front();

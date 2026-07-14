@@ -2,6 +2,9 @@
 #include "CommandSerializer.h"
 
 #include <stdexcept>
+#include <utility>
+#include <string>
+#include <algorithm>
 
 Headphones::Headphones(BluetoothWrapper& conn) : _conn(conn)
 {
@@ -213,6 +216,121 @@ void Headphones::setDsee(bool enabled)
 	});
 	std::lock_guard guard(this->_propertyMtx);
 	this->_dsee = enabled;
+}
+
+void Headphones::requestAmbientState()
+{
+	// GET: 66 17  ->  RET: 67 17 01 <effect> <settingType 0=NC/1=Ambient> <voice> <level>
+	auto resp = this->_conn.sendCommandAndReadResponse({ 0x66, 0x17 }, 0x67);
+	if (resp.size() >= 7)
+	{
+		bool on = resp[3] != 0;
+		bool ambient = resp[4] != 0;
+		bool voice = resp[5] != 0;
+		int level = (unsigned char)resp[6];
+		std::lock_guard guard(this->_propertyMtx);
+		// Update both current and desired so the UI reflects reality and isChanged() stays false.
+		this->_ambientSoundControl.current = this->_ambientSoundControl.desired = on;
+		this->_asmLevel.current = this->_asmLevel.desired = ambient ? level : 0;
+		this->_focusOnVoice.current = this->_focusOnVoice.desired = voice;
+	}
+}
+
+// --- Optional features (auto power off, firmware, codec, speak-to-chat, adaptive volume) ---
+
+namespace
+{
+	// Auto-power-off 2-byte codes, indexed 0=Off,1=5min,2=30min,3=1h,4=3h,5=when-taken-off.
+	const std::pair<unsigned char, unsigned char> APO_CODES[] = {
+		{ 0x11, 0x00 }, { 0x00, 0x00 }, { 0x01, 0x01 }, { 0x02, 0x02 }, { 0x03, 0x03 }, { 0x10, 0x00 }
+	};
+
+	int apoIndexFromCode(unsigned char c0, unsigned char c1)
+	{
+		for (int i = 0; i < 6; i++)
+		{
+			if (APO_CODES[i].first == c0 && APO_CODES[i].second == c1) return i;
+		}
+		return 0;
+	}
+
+	std::string codecName(unsigned char code)
+	{
+		switch (code)
+		{
+			case 0x01: return "SBC";
+			case 0x02: return "AAC";
+			case 0x10: return "LDAC";
+			case 0x20: return "aptX";
+			case 0x21: return "aptX HD";
+			default:   return "";
+		}
+	}
+}
+
+void Headphones::probeCapabilities()
+{
+	// Each GET is best-effort: an unsupported feature times out (recv timeout -> throw) and stays unsupported,
+	// so we never expose or send a command the device can't handle.
+	try {
+		auto r = this->_conn.sendCommandAndReadResponse({ (char)V2Command::FW_GET, 0x02 }, V2Command::FW_RET);
+		if (r.size() > 3) { std::lock_guard g(this->_propertyMtx); this->_firmware = std::string(r.begin() + 3, r.end()); this->_hasFirmware = true; }
+	} catch (...) {}
+
+	try {
+		auto r = this->_conn.sendCommandAndReadResponse({ (char)V2Command::CODEC_GET, 0x02 }, V2Command::CODEC_RET);
+		if (r.size() >= 3) { auto n = codecName((unsigned char)r[2]); if (!n.empty()) { std::lock_guard g(this->_propertyMtx); this->_codec = n; this->_hasCodec = true; } }
+	} catch (...) {}
+
+	try {
+		auto r = this->_conn.sendCommandAndReadResponse({ (char)V2Command::APO_GET, 0x05 }, V2Command::APO_RET);
+		if (r.size() >= 4) { std::lock_guard g(this->_propertyMtx); this->_autoPowerOff = apoIndexFromCode((unsigned char)r[2], (unsigned char)r[3]); this->_hasAutoPowerOff = true; }
+	} catch (...) {}
+
+	try {
+		auto r = this->_conn.sendCommandAndReadResponse({ (char)V2Command::BTNMODE_GET, (char)V2Command::SUB_ADAPTIVE_VOLUME }, V2Command::BTNMODE_RET, V2Command::SUB_ADAPTIVE_VOLUME);
+		if (r.size() >= 3) { std::lock_guard g(this->_propertyMtx); this->_adaptiveVolume = (r[2] == 0); this->_hasAdaptiveVolume = true; }
+	} catch (...) {}
+
+	try {
+		auto r = this->_conn.sendCommandAndReadResponse({ (char)V2Command::BTNMODE_GET, (char)V2Command::SUB_SPEAK_TO_CHAT }, V2Command::BTNMODE_RET, V2Command::SUB_SPEAK_TO_CHAT);
+		if (r.size() >= 3) { std::lock_guard g(this->_propertyMtx); this->_speakToChat = (r[2] == 0); this->_hasSpeakToChat = true; }
+	} catch (...) {}
+}
+
+bool Headphones::hasAutoPowerOff() { return this->_hasAutoPowerOff; }
+int Headphones::getAutoPowerOff() { return this->_autoPowerOff; }
+void Headphones::setAutoPowerOff(int index)
+{
+	if (index < 0 || index > 5) return;
+	this->_conn.sendCommand({ (char)V2Command::APO_SET, 0x05, (char)APO_CODES[index].first, (char)APO_CODES[index].second });
+	std::lock_guard guard(this->_propertyMtx);
+	this->_autoPowerOff = index;
+}
+
+bool Headphones::hasFirmware() { return this->_hasFirmware; }
+std::string Headphones::getFirmware() { return this->_firmware; }
+bool Headphones::hasCodec() { return this->_hasCodec; }
+std::string Headphones::getCodec() { return this->_codec; }
+
+bool Headphones::hasSpeakToChat() { return this->_hasSpeakToChat; }
+bool Headphones::getSpeakToChat() { return this->_speakToChat; }
+void Headphones::setSpeakToChat(bool enabled)
+{
+	// SET: f8 0c <enabled? 0:1> 01  (enable bit is inverted on v2)
+	this->_conn.sendCommand({ (char)V2Command::BTNMODE_SET, (char)V2Command::SUB_SPEAK_TO_CHAT, (char)(enabled ? 0x00 : 0x01), 0x01 });
+	std::lock_guard guard(this->_propertyMtx);
+	this->_speakToChat = enabled;
+}
+
+bool Headphones::hasAdaptiveVolume() { return this->_hasAdaptiveVolume; }
+bool Headphones::getAdaptiveVolume() { return this->_adaptiveVolume; }
+void Headphones::setAdaptiveVolume(bool enabled)
+{
+	// SET: f8 0a <enabled? 0:1>  (inverted)
+	this->_conn.sendCommand({ (char)V2Command::BTNMODE_SET, (char)V2Command::SUB_ADAPTIVE_VOLUME, (char)(enabled ? 0x00 : 0x01) });
+	std::lock_guard guard(this->_propertyMtx);
+	this->_adaptiveVolume = enabled;
 }
 
 bool Headphones::isChanged()

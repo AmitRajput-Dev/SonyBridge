@@ -56,6 +56,31 @@ public:
 	bool getDsee();
 	void setDsee(bool enabled);
 
+	// Reads the device's current ambient/NC state into the *current* properties (for live polling so
+	// changes made with the headphone's own button are reflected in the app).
+	void requestAmbientState();
+
+	// Optional features. probeCapabilities() sends each GET on connect; a feature is "supported" only if
+	// the device answers (otherwise we must never send its SET - see the WH-1000XM4 power-off incident).
+	void probeCapabilities();
+
+	bool hasAutoPowerOff();
+	int getAutoPowerOff();               // index into the option list (0=Off,1=5m,2=30m,3=1h,4=3h,5=when taken off)
+	void setAutoPowerOff(int index);
+
+	bool hasFirmware();
+	std::string getFirmware();
+	bool hasCodec();
+	std::string getCodec();
+
+	bool hasSpeakToChat();
+	bool getSpeakToChat();
+	void setSpeakToChat(bool enabled);
+
+	bool hasAdaptiveVolume();
+	bool getAdaptiveVolume();
+	void setAdaptiveVolume(bool enabled);
+
 	bool isChanged();
 	void setChanges();
 private:
@@ -71,6 +96,12 @@ private:
 	std::vector<int> _eqBands = { 0, 0, 0, 0, 0 };
 	int _eqClearBass = 0;
 	bool _dsee = false;
+
+	bool _hasAutoPowerOff = false; int _autoPowerOff = 0;
+	bool _hasFirmware = false; std::string _firmware;
+	bool _hasCodec = false; std::string _codec;
+	bool _hasSpeakToChat = false; bool _speakToChat = false;
+	bool _hasAdaptiveVolume = false; bool _adaptiveVolume = false;
 
 	std::mutex _propertyMtx;
 

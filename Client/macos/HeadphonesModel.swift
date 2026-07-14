@@ -28,9 +28,21 @@ final class HeadphonesModel: ObservableObject {
     @Published var clearBass = 0
     @Published var dsee = false
 
+    @Published var hasAutoPowerOff = false
+    @Published var autoPowerOff = 0
+    @Published var firmware = ""
+    @Published var codec = ""
+    @Published var hasSpeakToChat = false
+    @Published var speakToChat = false
+    @Published var hasAdaptiveVolume = false
+    @Published var adaptiveVolume = false
+    @Published var deviceMac = ""
+    @Published var protocolVersion = ""
+
     @Published var errorMessage: String?
 
     private var pollTimer: Timer?
+    private var dynamicTimer: Timer?
 
     func connect() {
         connecting = true
@@ -43,6 +55,7 @@ final class HeadphonesModel: ObservableObject {
                     self.syncFromBridge()
                     self.startWatchingConnection()
                     self.refreshStatus()
+                    self.startDynamicPolling()
                 } else if let error = error {
                     self.errorMessage = error
                 }
@@ -58,7 +71,55 @@ final class HeadphonesModel: ObservableObject {
             self.clearBass = self.bridge.clearBass
             self.dsee = self.bridge.dsee
             self.eqBands = (0..<5).map { self.bridge.equalizerBand(at: $0) }
+            self.hasAutoPowerOff = self.bridge.hasAutoPowerOff
+            self.autoPowerOff = self.bridge.autoPowerOff
+            self.firmware = self.bridge.firmware ?? ""
+            self.codec = self.bridge.codec ?? ""
+            self.hasSpeakToChat = self.bridge.hasSpeakToChat
+            self.speakToChat = self.bridge.speakToChat
+            self.hasAdaptiveVolume = self.bridge.hasAdaptiveVolume
+            self.adaptiveVolume = self.bridge.adaptiveVolume
         }
+    }
+
+    func setAutoPowerOff(_ index: Int) {
+        autoPowerOff = index
+        errorMessage = nil
+        bridge.setAutoPowerOff(index) { ok, error in if !ok, let e = error { self.errorMessage = e } }
+    }
+
+    func setSpeakToChat(_ on: Bool) {
+        speakToChat = on
+        errorMessage = nil
+        bridge.setSpeakToChat(on) { ok, error in if !ok, let e = error { self.errorMessage = e } }
+    }
+
+    func setAdaptiveVolume(_ on: Bool) {
+        adaptiveVolume = on
+        errorMessage = nil
+        bridge.setAdaptiveVolume(on) { ok, error in if !ok, let e = error { self.errorMessage = e } }
+    }
+
+    // Poll the button-changeable state so the app stays in sync when you use the headphone's own controls.
+    private func startDynamicPolling() {
+        stopDynamicPolling()
+        dynamicTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+            guard let self = self, self.connected else { return }
+            self.bridge.refreshDynamic {
+                self.mode = self.bridge.mode
+                let level = self.bridge.ambientLevel
+                if level > 0 { self.ambientLevel = level }
+                self.eqPreset = self.bridge.eqPreset
+                self.clearBass = self.bridge.clearBass
+                self.dsee = self.bridge.dsee
+                self.eqBands = (0..<5).map { self.bridge.equalizerBand(at: $0) }
+            }
+        }
+    }
+
+    private func stopDynamicPolling() {
+        dynamicTimer?.invalidate()
+        dynamicTimer = nil
     }
 
     func setEqualizer(_ preset: Int) {
@@ -88,6 +149,7 @@ final class HeadphonesModel: ObservableObject {
 
     func disconnect() {
         stopWatchingConnection()
+        stopDynamicPolling()
         bridge.disconnect()
         connected = false
         deviceName = ""
@@ -104,6 +166,7 @@ final class HeadphonesModel: ObservableObject {
                 self.deviceName = ""
                 self.errorMessage = "Headphones disconnected."
                 self.stopWatchingConnection()
+                self.stopDynamicPolling()
             }
         }
     }
@@ -142,6 +205,8 @@ final class HeadphonesModel: ObservableObject {
     private func syncFromBridge() {
         connected = bridge.connected
         deviceName = bridge.deviceName ?? ""
+        deviceMac = bridge.deviceMac ?? ""
+        protocolVersion = bridge.protocolVersionString ?? ""
         supportsVpt = bridge.supportsVpt
         supportsEqualizer = bridge.supportsEqualizer
         maxAmbientLevel = bridge.maxAmbientLevel

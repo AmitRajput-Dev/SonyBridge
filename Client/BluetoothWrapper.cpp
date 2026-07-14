@@ -65,7 +65,7 @@ SonyProtocolVersion BluetoothWrapper::getProtocolVersion() noexcept
 	return this->_connector->getProtocolVersion();
 }
 
-Buffer BluetoothWrapper::sendCommandAndReadResponse(const std::vector<char>& bytes, unsigned char retCommandId)
+Buffer BluetoothWrapper::sendCommandAndReadResponse(const std::vector<char>& bytes, unsigned char retCommandId, int retSubType)
 {
 	std::lock_guard guard(this->_connectorMtx);
 	auto data = CommandSerializer::packageDataForBt(bytes, DATA_TYPE::DATA_MDR, this->_seqNumber++);
@@ -81,7 +81,8 @@ Buffer BluetoothWrapper::sendCommandAndReadResponse(const std::vector<char>& byt
 			continue;
 		}
 		if (msg.dataType == DATA_TYPE::DATA_MDR && !msg.payload.empty()
-			&& (unsigned char)msg.payload[0] == retCommandId)
+			&& (unsigned char)msg.payload[0] == retCommandId
+			&& (retSubType < 0 || (msg.payload.size() >= 2 && (unsigned char)msg.payload[1] == retSubType)))
 		{
 			return msg.payload;
 		}

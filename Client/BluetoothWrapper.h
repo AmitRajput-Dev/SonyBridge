@@ -24,8 +24,9 @@ public:
 	int sendCommand(const std::vector<char>& bytes);
 
 	// Sends an inquiry command and returns the payload of the first DATA_MDR response whose command id
-	// (payload[0]) matches retCommandId, skipping the ACK and any unrelated notifications.
-	Buffer sendCommandAndReadResponse(const std::vector<char>& bytes, unsigned char retCommandId);
+	// (payload[0]) matches retCommandId, skipping the ACK and any unrelated notifications. When retSubType
+	// is >= 0, payload[1] must also match it (for multiplexed command families that share one opcode).
+	Buffer sendCommandAndReadResponse(const std::vector<char>& bytes, unsigned char retCommandId, int retSubType = -1);
 
 	bool isConnected() noexcept;
 	//Try to connect to the headphones
