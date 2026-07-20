@@ -11,6 +11,8 @@
 #include <stdlib.h>
 
 #include <sys/socket.h>
+#include <sys/time.h>
+#include <cerrno>
 #include <bluetooth/bluetooth.h>
 #include <bluetooth/rfcomm.h>
 
@@ -30,14 +32,18 @@ LinuxBluetoothConnector::~LinuxBluetoothConnector()
 
 int LinuxBluetoothConnector::recv(char *buf, size_t length)
 {
-  size_t read = ::read(this->_socket, buf, length);
-  // printf("length: %ld, read: %ld\n", length, read);
-  // for (int i = 0; i < read; i++)
-  // {
-  //   std::cout << std::setfill('0') << std::setw(2) << std::hex << (0xff & (unsigned int)buf[i]) << " ";
-  // }
-  // std::cout << '\n';
-  return read;
+  ssize_t bytesRead = ::read(this->_socket, buf, length);
+  if (bytesRead < 0)
+  {
+    // A recv timeout (SO_RCVTIMEO) is expected while probing optional features: report it as recoverable
+    // WITHOUT forcing a disconnect so an unanswered GET just hides that feature instead of dropping the link.
+    if (errno == EAGAIN || errno == EWOULDBLOCK)
+    {
+      throw RecoverableException("recv timed out", false);
+    }
+    throw RecoverableException(std::string("Couldn't recv: ") + strerror(errno), true);
+  }
+  return (int)bytesRead;
 }
 
 int LinuxBluetoothConnector::send(char *buf, size_t length)
@@ -67,6 +73,10 @@ void LinuxBluetoothConnector::connect(const std::string &addrStr)
   uint32_t linkmode = RFCOMM_LM_AUTH | RFCOMM_LM_ENCRYPT;
   int sl = sizeof(linkmode);
   setsockopt(this->_socket, SOL_RFCOMM, RFCOMM_LM, &linkmode, sl);
+
+  // Bound recv so capability probing can't block forever (matches the 2.5s macOS timeout).
+  struct timeval recvTimeout = {2, 500000};
+  setsockopt(this->_socket, SOL_SOCKET, SO_RCVTIMEO, &recvTimeout, sizeof(recvTimeout));
 
   // set the connection parameters (who to connect to)
   addr.rc_family = AF_BLUETOOTH;

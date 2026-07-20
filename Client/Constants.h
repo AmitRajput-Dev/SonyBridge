@@ -72,7 +72,7 @@ enum class EQ_PRESET : unsigned char
 	MANUAL = 0xa0
 };
 
-#define APP_NAME "Sony Headphones App v" __HEADPHONES_APP_VERSION__
+#define APP_NAME "SonyBridge " __HEADPHONES_APP_VERSION__
 #define APP_NAME_W (L"" APP_NAME)
 
 using Buffer = std::vector<char>;

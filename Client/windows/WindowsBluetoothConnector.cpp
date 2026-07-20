@@ -87,7 +87,14 @@ int WindowsBluetoothConnector::recv(char* buf, size_t length)
 	auto bytesReceived = ::recv(this->_socket, buf, length, 0);
 	if (bytesReceived == SOCKET_ERROR)
 	{
-		throw RecoverableException("Couldn't recv (" + std::to_string(WSAGetLastError()) + ")", true);
+		int err = WSAGetLastError();
+		// A recv timeout is expected during capability probing - surface it as recoverable WITHOUT forcing a
+		// disconnect, so an unanswered optional-feature GET just hides that feature instead of dropping the link.
+		if (err == WSAETIMEDOUT)
+		{
+			throw RecoverableException("recv timed out", false);
+		}
+		throw RecoverableException("Couldn't recv (" + std::to_string(err) + ")", true);
 	}
 	return bytesReceived;
 }
@@ -172,6 +179,12 @@ void WindowsBluetoothConnector::_initSocket()
 	{
 		throw std::runtime_error("Couldn't set SO_BTH_ENCRYPT: " + std::to_string(WSAGetLastError()));
 	}
+
+	// Bound recv so it can't block forever. Capability probing sends a GET and relies on this timeout to
+	// decide a feature is unsupported - without it the app hangs on "Reading device settings" (matches the
+	// 2.5s timeout the macOS connector uses).
+	DWORD recvTimeoutMs = 2500;
+	::setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<char*>(&recvTimeoutMs), sizeof(recvTimeoutMs));
 
 	this->_socket = sock;
 }

@@ -71,6 +71,7 @@ private:
 	SingleInstanceFuture<void> _sendCommandFuture;
 	SingleInstanceFuture<void> _featureCommandFuture;
 	SingleInstanceFuture<void> _refreshFuture;
+	SingleInstanceFuture<void> _probeFuture;
 	SingleInstanceFuture<void> _pollFuture;
 	SingleInstanceFuture<void> _connectFuture;
 	TimedMessageQueue _mq;
@@ -78,6 +79,7 @@ private:
 
 	bool _initialized = false;
 	bool _synced = false;
+	bool _probed = false;
 	int _pollCounter = 0;
 
 	// UI state, synced from the device once after connect; user edits are pushed back to the headphones.

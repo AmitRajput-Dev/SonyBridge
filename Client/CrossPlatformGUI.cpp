@@ -65,6 +65,7 @@ bool CrossPlatformGUI::performGUIPass()
 	else
 	{
 		this->_synced = false;
+		this->_probed = false;
 		this->_initialized = false;
 		this->_pollCounter = 0;
 	}
@@ -178,33 +179,29 @@ void CrossPlatformGUI::_drawDeviceDiscovery()
 
 void CrossPlatformGUI::_pumpConnectionState()
 {
-	// One-time post-connect read: init handshake (v2), then valid protocol traffic + settings snapshot.
+	// Phase 1 - fast post-connect reads: init handshake (v2), protocol-aware ambient read, then the
+	// always-answered settings. Each read is guarded so one slow/unanswered reply can't block the others or
+	// drop the link, and we always reach _synced so the UI leaves the "Reading device settings" state.
 	if (!this->_synced && !this->_refreshFuture.valid())
 	{
 		this->_refreshFuture.setFromAsync([this]() {
-			if (!this->_initialized)
-			{
-				this->_headphones.initDevice();
-				this->_initialized = true;
-			}
+			try { if (!this->_initialized) { this->_headphones.initDevice(); this->_initialized = true; } }
+			catch (const std::exception&) {}
 			// requestAmbientState is protocol-aware (v1 uses 66 02, v2 uses 66 17) and read-only; sending it
 			// immediately gives v1 devices the handshake traffic they need to stay powered on.
-			this->_headphones.requestAmbientState();
+			try { this->_headphones.requestAmbientState(); } catch (const std::exception&) {}
 			if (this->_isV2())
 			{
-				this->_headphones.requestBattery();
-				this->_headphones.requestEqualizer();
-				this->_headphones.requestDsee();
-				this->_headphones.probeCapabilities();
+				try { this->_headphones.requestBattery(); } catch (const std::exception&) {}
+				try { this->_headphones.requestEqualizer(); } catch (const std::exception&) {}
+				try { this->_headphones.requestDsee(); } catch (const std::exception&) {}
 			}
 		});
 	}
 
 	if (this->_refreshFuture.valid() && this->_refreshFuture.ready())
 	{
-		try { this->_refreshFuture.get(); }
-		catch (const RecoverableException& e) { if (e.shouldDisconnect) this->_bt.disconnect(); this->_mq.addMessage(e.what()); }
-		catch (const std::exception& e) { this->_mq.addMessage(e.what()); }
+		try { this->_refreshFuture.get(); } catch (const std::exception&) {}
 		this->_syncUIFromHeadphones();
 		this->_synced = true;
 		this->_pollCounter = 0;
@@ -212,6 +209,21 @@ void CrossPlatformGUI::_pumpConnectionState()
 
 	if (!this->_synced)
 		return;
+
+	// Phase 2 - probe optional capabilities in the background. Each unsupported GET times out (~2.5s), so
+	// this must not gate the UI. The Feature cards read has*() live, so they appear once probing settles.
+	if (this->_isV2() && !this->_probed && !this->_probeFuture.valid())
+	{
+		this->_probeFuture.setFromAsync([this]() { try { this->_headphones.probeCapabilities(); } catch (const std::exception&) {} });
+	}
+	if (this->_probeFuture.valid() && this->_probeFuture.ready())
+	{
+		try { this->_probeFuture.get(); } catch (const std::exception&) {}
+		this->_probed = true;
+		this->_uiAutoPowerOff = this->_headphones.getAutoPowerOff();
+		this->_uiSpeakToChat = this->_headphones.getSpeakToChat();
+		this->_uiAdaptiveVolume = this->_headphones.getAdaptiveVolume();
+	}
 
 	// Poll the button-changeable ASM state so the app reflects changes made on the headphone itself.
 	if (this->_pollFuture.valid() && this->_pollFuture.ready())
