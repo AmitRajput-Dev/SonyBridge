@@ -266,18 +266,13 @@ void Headphones::requestAmbientState()
 	}
 	else
 	{
-		// GET: 66 02  ->  RET: 67 02 <effect> <settingType> <dualSingle> <asmSettingType> <asmId> <asmLevel>
-		auto resp = this->_conn.sendCommandAndReadResponse({ 0x66, 0x02 }, 0x67);
-		if (resp.size() >= 8)
-		{
-			bool on = resp[2] != 0;
-			bool voice = resp[6] != 0;
-			int level = (unsigned char)resp[7];
-			std::lock_guard guard(this->_propertyMtx);
-			this->_ambientSoundControl.current = this->_ambientSoundControl.desired = on;
-			this->_asmLevel.current = this->_asmLevel.desired = (level == 255) ? 0 : level;
-			this->_focusOnVoice.current = this->_focusOnVoice.desired = voice;
-		}
+		// v1 (e.g. WH-1000XM4): upstream drove these settings fire-and-forget, with no read-back at all.
+		// We still issue the GET because v1 devices need valid protocol traffic after connect to stay
+		// powered on, and we read the reply to drain it from the socket - but we deliberately do NOT parse
+		// it back into the NC/Ambient/level state. The v1 reply layout is unverified, and letting a
+		// mis-parsed 2s poll overwrite the user's choice is exactly what made Ambient snap back to Noise
+		// Cancelling and the level slider jump while being dragged. Trust the user's selection instead.
+		this->_conn.sendCommandAndReadResponse({ 0x66, 0x02 }, 0x67);
 	}
 }
 
