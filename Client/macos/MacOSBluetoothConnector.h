@@ -52,7 +52,11 @@ public:
 
 private:
     void *rfcommDevice = nullptr;
-    std::atomic<void*> rfcommchannel{nullptr};
+    // Owning (+1, CFBridgingRetain) reference to the open IOBluetoothRFCOMMChannel, or null. Guarded by
+    // channelMtx: readers take their own strong reference under the lock, so a remote close on the main
+    // run loop can never free the channel under an in-flight send().
+    void *rfcommchannel = nullptr;
+    std::mutex channelMtx;
     std::thread uthread;
     //Total bytes across receivedBytes; guarded by receiveDataMutex.
     size_t receivedBytesTotal = 0;

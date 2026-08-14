@@ -57,7 +57,11 @@ int MacOSBluetoothConnector::send(char* buf, size_t length)
 #ifdef SHC_DEBUG_PROTOCOL
     _debugHexDump("send", buf, length);
 #endif
-    IOBluetoothRFCOMMChannel *channel = (__bridge IOBluetoothRFCOMMChannel*)rfcommchannel.load();
+    IOBluetoothRFCOMMChannel *channel = nil;
+    {
+        std::lock_guard<std::mutex> g(channelMtx);
+        channel = (__bridge IOBluetoothRFCOMMChannel*)rfcommchannel;
+    }
     if (channel == nil) throw RecoverableException("Bluetooth connection is closed", false);
     [channel writeSync:(void*)buf length:length];
     return (int)length;
@@ -124,7 +128,10 @@ void MacOSBluetoothConnector::connectToMac(MacOSBluetoothConnector* macOSBluetoo
         return;
     }
     // store the channel
-    macOSBluetoothConnector->rfcommchannel.store((__bridge void*) channel);
+    {
+        std::lock_guard<std::mutex> g(macOSBluetoothConnector->channelMtx);
+        macOSBluetoothConnector->rfcommchannel = (void*)CFBridgingRetain(channel);
+    }
     macOSBluetoothConnector->protocolVersion = protocolVersion;
 
     // tell the other tread that we are done connecting
@@ -290,7 +297,12 @@ void MacOSBluetoothConnector::disconnect() noexcept
 }
 void MacOSBluetoothConnector::closeConnection() {
     // Only one close path owns the channel pointer. A remote-close callback clears it first.
-    IOBluetoothRFCOMMChannel *chan = (__bridge IOBluetoothRFCOMMChannel*)rfcommchannel.exchange(nullptr);
+    IOBluetoothRFCOMMChannel *chan = nil;
+    {
+        std::lock_guard<std::mutex> g(channelMtx);
+        chan = (IOBluetoothRFCOMMChannel*)CFBridgingRelease(rfcommchannel);
+        rfcommchannel = nullptr;
+    }
     if (chan == nil) return;
     [chan setDelegate: nil];
     // close the channel
@@ -299,7 +311,11 @@ void MacOSBluetoothConnector::closeConnection() {
 
 void MacOSBluetoothConnector::handleChannelClosed() noexcept
 {
-    rfcommchannel.store(nullptr);
+    {
+        std::lock_guard<std::mutex> g(channelMtx);
+        if (rfcommchannel) CFRelease(rfcommchannel);
+        rfcommchannel = nullptr;
+    }
     // running=false must be stored under disconnectionMutex: connectToMac's untimed wait
     // would otherwise miss a notify racing its predicate check and never wake.
     {
@@ -315,6 +331,7 @@ bool MacOSBluetoothConnector::isConnected() noexcept
 {
     if (!running)
         return false;
-    IOBluetoothRFCOMMChannel *chan = (__bridge IOBluetoothRFCOMMChannel*)rfcommchannel.load();
+    std::lock_guard<std::mutex> g(channelMtx);
+    IOBluetoothRFCOMMChannel *chan = (__bridge IOBluetoothRFCOMMChannel*)rfcommchannel;
     return chan != nil && chan.isOpen;
 }
