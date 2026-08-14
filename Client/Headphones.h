@@ -133,6 +133,10 @@ public:
 
 	bool isChanged();
 	void setChanges();
+
+	// Rolls a failed ambient/NC write back to the last known device state. Must be called when
+	// setChanges() throws - see the comment on the definition.
+	void discardAmbientChanges();
 private:
 	Property<bool> _ambientSoundControl = { false, false };
 	Property<bool> _focusOnVoice = { false, false };

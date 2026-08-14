@@ -1,5 +1,10 @@
 #include "BluetoothWrapper.h"
 
+// How many frames one transaction will read before giving up. The device interleaves ACKs and
+// unsolicited notifications with the reply we're after, so a handful of unrelated frames is normal;
+// this only bounds a device that never sends what we asked for.
+static constexpr int MAX_FRAMES_PER_TRANSACTION = 16;
+
 BluetoothWrapper::BluetoothWrapper(std::unique_ptr<IBluetoothConnector> connector)
 {
 	this->_connector.swap(connector);
@@ -84,7 +89,7 @@ Buffer BluetoothWrapper::sendCommandAndReadResponse(const std::vector<char>& byt
 	this->_connector->send(data.data(), data.size());
 
 	// The device replies with an ACK and then the RET frame; unrelated notifications may interleave.
-	for (int i = 0; i < 16; i++)
+	for (int i = 0; i < MAX_FRAMES_PER_TRANSACTION; i++)
 	{
 		auto msg = this->_readMessage();
 		if (msg.dataType == DATA_TYPE::ACK)
@@ -106,7 +111,7 @@ void BluetoothWrapper::_waitForAck()
 {
 	// Notifications can arrive between a SET and its ACK. _readMessage() acknowledges DATA_MDR frames;
 	// keep consuming until the device's actual ACK arrives so it cannot poison the next command.
-	for (int i = 0; i < 16; i++)
+	for (int i = 0; i < MAX_FRAMES_PER_TRANSACTION; i++)
 	{
 		auto msg = this->_readMessage();
 		if (msg.dataType == DATA_TYPE::ACK)
@@ -145,8 +150,13 @@ CommandSerializer::Message BluetoothWrapper::_readMessage()
 			throw RecoverableException("Bluetooth connection closed while reading a frame", true);
 		}
 
-		// Bytes outside START/END markers are transport noise, not message data. When a frame spans recv()
-		// calls, the next chunk starts inside the frame and therefore begins at byte zero.
+		// Every 60/61/62 inside a frame is escaped, so a START_MARKER can only ever begin one. That makes
+		// resyncing unambiguous, which is what matters after a brief link glitch garbles or truncates a
+		// chunk: bytes before the first START_MARKER are the tail of a frame we can no longer parse, and
+		// a second START_MARKER means the frame we were collecting never finished. Both cases resync on
+		// the new marker here. Previously the first silently concatenated garbage into the message and
+		// the second threw, in either case leaving the parser stranded mid-stream for the rest of the
+		// session - every command after that failed and the UI kept snapping back to the old value.
 		size_t messageStart = ongoingMessage ? 0 : static_cast<size_t>(numRecvd);
 		size_t messageEnd = static_cast<size_t>(numRecvd);
 
@@ -154,11 +164,10 @@ CommandSerializer::Message BluetoothWrapper::_readMessage()
 		{
 			if (buf[i] == START_MARKER)
 			{
-				if (ongoingMessage)
-				{
-					throw RecoverableException("Invalid: Multiple start markers without an end marker", true);
-				}
+				// Whatever we had collected was a truncated frame, not the start of this one.
+				msgBytes.clear();
 				messageStart = i + 1;
+				messageEnd = static_cast<size_t>(numRecvd);
 				ongoingMessage = true;
 			}
 			else if (ongoingMessage && buf[i] == END_MARKER)
@@ -167,16 +176,22 @@ CommandSerializer::Message BluetoothWrapper::_readMessage()
 				ongoingMessage = false;
 				messageFinished = true;
 				// A single recv() can return more than one framed message back-to-back; keep whatever's
-				// past this message's END_MARKER for the next _waitForAck() call instead of dropping it.
+				// past this message's END_MARKER for the next read instead of dropping it.
 				this->_leftoverBytes.assign(buf + i + 1, buf + numRecvd);
 				break;
 			}
 		}
 
-		msgBytes.insert(msgBytes.end(), buf + messageStart, buf + messageEnd);
+		if (messageStart < messageEnd)
+		{
+			msgBytes.insert(msgBytes.end(), buf + messageStart, buf + messageEnd);
+		}
+
+		// Bail out on a stream that keeps delivering bytes but never an END_MARKER, so the next read can
+		// resync on the next START_MARKER instead of growing this buffer forever.
 		if (msgBytes.size() > MAX_BLUETOOTH_MESSAGE_SIZE)
 		{
-			throw RecoverableException("Bluetooth frame exceeds the maximum message size", true);
+			throw RecoverableException("Invalid: message exceeded the maximum size without an end marker", true);
 		}
 	} while (!messageFinished);
 

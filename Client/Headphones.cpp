@@ -398,7 +398,9 @@ void Headphones::requestAmbientState()
 	if (protocolVersion == SonyProtocolVersion::V2)
 	{
 		// GET: 66 17  ->  RET: 67 17 01 <effect> <settingType 0=NC/1=Ambient> <voice> <level>
-		auto resp = this->_conn.sendCommandAndReadResponse({ 0x66, 0x17 }, 0x67);
+		// Match the sub-type too: 0x67 also carries unsolicited notifications with a different layout,
+		// and accepting one of those parsed <effect>/<level> out of unrelated bytes.
+		auto resp = this->_conn.sendCommandAndReadResponse({ 0x66, 0x17 }, 0x67, 0x17);
 		if (resp.size() >= 7)
 		{
 			bool on = resp[3] != 0;
@@ -406,10 +408,17 @@ void Headphones::requestAmbientState()
 			bool voice = resp[5] != 0;
 			int level = (unsigned char)resp[6];
 			std::lock_guard guard(this->_propertyMtx);
-			// Update both current and desired so the UI reflects reality and isChanged() stays false.
-			this->_ambientSoundControl.current = this->_ambientSoundControl.desired = on;
-			this->_asmLevel.current = this->_asmLevel.desired = ambient ? level : 0;
-			this->_focusOnVoice.current = this->_focusOnVoice.desired = voice;
+			// A change the user just made may not be on the wire yet - the UI writes the desired values
+			// and only then queues the send - and this reply was produced before it. Adopting it would
+			// both revert the user's choice and clear the pending change (isChanged() goes false), so the
+			// command would never be sent at all. Leave everything alone until setChanges() has flushed it.
+			if (this->_ambientSoundControl.isFulfilled() && this->_asmLevel.isFulfilled() && this->_focusOnVoice.isFulfilled())
+			{
+				// Update both current and desired so the UI reflects reality and isChanged() stays false.
+				this->_ambientSoundControl.current = this->_ambientSoundControl.desired = on;
+				this->_asmLevel.current = this->_asmLevel.desired = ambient ? level : 0;
+				this->_focusOnVoice.current = this->_focusOnVoice.desired = voice;
+			}
 		}
 	}
 	else
@@ -872,6 +881,17 @@ void Headphones::setMultipoint(bool enabled)
 	this->_conn.sendCommand({ (char)V2Command::SYSCTL_SET, 0x00, (char)V2Command::SUB_SYSCTL_MULTIPOINT, 0x01 });
 	std::lock_guard guard(this->_propertyMtx);
 	this->_multipointEnabled = enabled;
+}
+
+// requestAmbientState() deliberately refuses to adopt device state while a change is pending, so a write
+// that never reached the device would otherwise block the read-back for the rest of the session - the UI
+// would freeze on a value the headphones never took. Dropping the pending change lets polling resume.
+void Headphones::discardAmbientChanges()
+{
+	std::lock_guard guard(this->_propertyMtx);
+	this->_ambientSoundControl.desired = this->_ambientSoundControl.current;
+	this->_asmLevel.desired = this->_asmLevel.current;
+	this->_focusOnVoice.desired = this->_focusOnVoice.current;
 }
 
 bool Headphones::isChanged()

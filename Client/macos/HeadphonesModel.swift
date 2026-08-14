@@ -254,15 +254,12 @@ final class HeadphonesModel: ObservableObject {
                 self.bridge.refreshMultipoint { self.syncMultipointFromBridge() }
             }
             self.bridge.refreshDynamic {
+                // Only publish what refreshDynamic actually re-read: ambient/NC state and the battery.
+                // EQ and DSEE aren't re-read on this path - they'd come straight back from the C++ cache,
+                // so a failed write would snap back two seconds later and an EQ drag would fight the timer.
                 self.assignIfChanged(\.mode, self.bridge.mode)
                 let level = self.bridge.ambientLevel
                 if level > 0 { self.assignIfChanged(\.ambientLevel, level) }
-                self.assignIfChanged(\.eqPreset, self.bridge.eqPreset)
-                self.assignIfChanged(\.supportsEqualizer, self.bridge.supportsEqualizer)
-                self.assignIfChanged(\.clearBass, self.bridge.clearBass)
-                self.assignIfChanged(\.supportsDsee, self.bridge.supportsDsee)
-                self.assignIfChanged(\.dsee, self.bridge.dsee)
-                self.assignIfChanged(\.eqBands, (0..<5).map { self.bridge.equalizerBand(at: $0) })
                 self.syncBatteryFromBridge()
             }
         }
@@ -273,6 +270,8 @@ final class HeadphonesModel: ObservableObject {
         dynamicTimer = nil
     }
 
+    // The controls below update optimistically and are corrected here if the write failed, rather than
+    // being silently overwritten by the next poll tick.
     func setEqualizer(_ preset: Int) {
         if preset == 0xA0 {
             applyCustomEq()
@@ -281,7 +280,10 @@ final class HeadphonesModel: ObservableObject {
         eqPreset = preset
         errorMessage = nil
         bridge.setEqualizerPreset(preset) { ok, error in
-            if !ok, let error = error { self.errorMessage = error }
+            if !ok {
+                self.eqPreset = self.bridge.eqPreset
+                if let error = error { self.errorMessage = error }
+            }
         }
     }
 
@@ -315,7 +317,10 @@ final class HeadphonesModel: ObservableObject {
         dsee = on
         errorMessage = nil
         bridge.setDsee(on) { ok, error in
-            if !ok, let error = error { self.errorMessage = error }
+            if !ok {
+                self.dsee = self.bridge.dsee
+                if let error = error { self.errorMessage = error }
+            }
         }
     }
 
@@ -391,11 +396,10 @@ final class HeadphonesModel: ObservableObject {
                     return
                 }
             }
-            if ok {
-                self.syncFromBridge()
-            } else if let error = error {
-                self.errorMessage = error
-            }
+            // Sync either way: on failure the bridge has rolled the pending change back, so this shows
+            // what the headphones are actually set to instead of leaving the UI lying.
+            self.syncFromBridge()
+            if !ok, let error = error { self.errorMessage = error }
         }
     }
 
