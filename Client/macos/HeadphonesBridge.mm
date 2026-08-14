@@ -15,6 +15,10 @@
 // RecoverableException comes in transitively via BluetoothWrapper.h -> IBluetoothConnector.h -> Exceptions.h.
 // (Exceptions.h isn't a project file reference, so it can't be #included directly from this directory.)
 
+// The dynamic poll fires every 2s; re-read the battery every 15th tick (~30s), which is far more often
+// than a headphone battery meaningfully moves but cheap enough not to crowd out the ambient/NC polling.
+static const unsigned kBatteryPollEveryNTicks = 15;
+
 @interface SHCPairedDevice ()
 @property (nonatomic, copy, readwrite) NSString *name;
 @property (nonatomic, copy, readwrite) NSString *address;
@@ -40,6 +44,8 @@ static NSString *SHCNormalizedAddress(NSString *address) {
     NSString *_deviceName;
     NSString *_deviceMac;
     std::atomic_bool _initialized;
+    // Only touched inside blocks on _cmdQueue, which is serial.
+    unsigned _dynamicTick;
     // All device I/O runs on this serial queue. Bluetooth commands are stateful, and serializing reads with
     // writes also prevents a slow capability probe from racing a user action or dynamic refresh.
     dispatch_queue_t _cmdQueue;
@@ -110,6 +116,9 @@ static NSString *SHCNormalizedAddress(NSString *address) {
 - (NSInteger)batteryLeft { return _hp ? _hp->getBatteryLeft() : -1; }
 - (NSInteger)batteryRight { return _hp ? _hp->getBatteryRight() : -1; }
 - (NSInteger)batteryCase { return _hp ? _hp->getBatteryCase() : -1; }
+- (BOOL)batteryLeftCharging { return _hp && _hp->isBatteryLeftCharging(); }
+- (BOOL)batteryRightCharging { return _hp && _hp->isBatteryRightCharging(); }
+- (BOOL)batteryCaseCharging { return _hp && _hp->isBatteryCaseCharging(); }
 
 - (NSInteger)eqPreset {
     return _hp ? (NSInteger)_hp->getEqualizerPreset() : 0;
@@ -249,6 +258,8 @@ static BOOL SHCLooksLikeSonyHeadset(NSString *name) {
     _deviceName = [device nameOrAddress];
     _deviceMac = [device addressString];
     _hp = std::make_shared<Headphones>(*_bt);
+    // Lets requestBattery() probe the per-earbud layout first on TWS models (WF-*/LinkBuds).
+    _hp->setDeviceName(_deviceName ? [_deviceName UTF8String] : "");
     // A link the headset dropped on its own never went through -disconnect, so reset here: every new
     // Headphones needs the init handshake (its reply also gates the multipoint reads).
     _initialized = false;
@@ -374,10 +385,16 @@ static NSString *_Nullable SHCSourceSwitchError(int result) {
 - (void)refreshDynamicWithCompletion:(void (^)(void))completion {
     if (!_hp || !self.connected) { completion(); return; }
     auto hp = _hp;
+    BOOL isV2 = _bt->getProtocolVersion() == SonyProtocolVersion::V2;
     dispatch_async(_cmdQueue, ^{
         // The headphone's physical button only changes ambient/NC, so that's all we poll (keeps traffic low).
         // requestAmbientState() is protocol-aware (v2 uses 66 17, v1 uses 66 02), so this is safe on both.
         try { hp->requestAmbientState(); } catch (std::exception &exc) {}
+        // Battery drains, earbuds get docked and the case charges them, so re-read it too - but only
+        // every Nth poll, since it costs up to three inquiries on TWS. v2 only: 0x22 is POWER_OFF on v1.
+        if (isV2 && self->_dynamicTick++ % kBatteryPollEveryNTicks == 0) {
+            try { hp->requestBattery(); } catch (std::exception &exc) {}
+        }
         dispatch_async(dispatch_get_main_queue(), ^{ completion(); });
     });
 }

@@ -43,6 +43,9 @@ final class HeadphonesModel: ObservableObject {
     @Published var batteryLeft = -1
     @Published var batteryRight = -1
     @Published var batteryCase = -1
+    @Published var batteryLeftCharging = false
+    @Published var batteryRightCharging = false
+    @Published var batteryCaseCharging = false
     @Published var eqPreset = 0
     @Published var supportsEqualizer = false
     @Published var eqBands = [0, 0, 0, 0, 0]
@@ -124,12 +127,7 @@ final class HeadphonesModel: ObservableObject {
 
     func refreshStatus() {
         bridge.refreshStatus {
-            self.batteryLevel = self.bridge.batteryLevel
-            self.batteryCharging = self.bridge.batteryCharging
-            self.hasDualBattery = self.bridge.hasDualBattery
-            self.batteryLeft = self.bridge.batteryLeft
-            self.batteryRight = self.bridge.batteryRight
-            self.batteryCase = self.bridge.batteryCase
+            self.syncBatteryFromBridge()
             self.eqPreset = self.bridge.eqPreset
             self.supportsEqualizer = self.bridge.supportsEqualizer
             self.clearBass = self.bridge.clearBass
@@ -198,6 +196,18 @@ final class HeadphonesModel: ObservableObject {
         multipointDiagnostics = bridge.multipointDiagnostics
     }
 
+    private func syncBatteryFromBridge() {
+        assignIfChanged(\.batteryLevel, bridge.batteryLevel)
+        assignIfChanged(\.batteryCharging, bridge.batteryCharging)
+        assignIfChanged(\.hasDualBattery, bridge.hasDualBattery)
+        assignIfChanged(\.batteryLeft, bridge.batteryLeft)
+        assignIfChanged(\.batteryRight, bridge.batteryRight)
+        assignIfChanged(\.batteryCase, bridge.batteryCase)
+        assignIfChanged(\.batteryLeftCharging, bridge.batteryLeftCharging)
+        assignIfChanged(\.batteryRightCharging, bridge.batteryRightCharging)
+        assignIfChanged(\.batteryCaseCharging, bridge.batteryCaseCharging)
+    }
+
     func setAutoPowerOff(_ index: Int) {
         autoPowerOff = index
         errorMessage = nil
@@ -253,6 +263,7 @@ final class HeadphonesModel: ObservableObject {
                 self.assignIfChanged(\.supportsDsee, self.bridge.supportsDsee)
                 self.assignIfChanged(\.dsee, self.bridge.dsee)
                 self.assignIfChanged(\.eqBands, (0..<5).map { self.bridge.equalizerBand(at: $0) })
+                self.syncBatteryFromBridge()
             }
         }
     }

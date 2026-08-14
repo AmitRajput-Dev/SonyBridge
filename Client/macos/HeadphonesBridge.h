@@ -47,6 +47,9 @@ typedef NS_ENUM(NSInteger, SHCAmbientMode) {
 @property (nonatomic, readonly) NSInteger batteryLeft;    // -1 if n/a
 @property (nonatomic, readonly) NSInteger batteryRight;
 @property (nonatomic, readonly) NSInteger batteryCase;
+@property (nonatomic, readonly) BOOL batteryLeftCharging;
+@property (nonatomic, readonly) BOOL batteryRightCharging;
+@property (nonatomic, readonly) BOOL batteryCaseCharging;
 @property (nonatomic, readonly) NSInteger eqPreset;       // raw preset byte (EQ_PRESET)
 @property (nonatomic, readonly) BOOL supportsEqualizer;   // true after a successful read-only probe
 @property (nonatomic, readonly) NSInteger clearBass;      // -10..10

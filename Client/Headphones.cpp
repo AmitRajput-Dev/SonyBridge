@@ -98,6 +98,72 @@ void Headphones::initDevice()
 		&& resp[V2Command::INIT_REPLY_TABLE2_INDEX] == 0x00;
 }
 
+void Headphones::setDeviceName(const std::string& name)
+{
+	std::lock_guard guard(this->_propertyMtx);
+	this->_deviceName = name;
+}
+
+// True for Sony's true-wireless earbuds, which report a battery per earbud instead of one for the
+// whole device. Only used to pick the probe order - an unrecognised name still finds both layouts,
+// just one timed-out inquiry slower.
+bool Headphones::_looksLikeEarbuds() const
+{
+	std::string name;
+	for (char c : this->_deviceName) name.push_back((char)std::tolower((unsigned char)c));
+	return name.find("wf-") != std::string::npos || name.find("linkbuds") != std::string::npos;
+}
+
+// Reads the per-earbud (and case) levels. Returns false if the device didn't answer this sub-type or
+// answered with nothing usable, so the caller can fall back to the other layout.
+bool Headphones::_requestDualBattery(unsigned char subType)
+{
+	Buffer resp;
+	try {
+		resp = this->_conn.sendCommandAndReadResponse(
+			{ (char)V2Command::BATTERY_GET, (char)subType }, V2Command::BATTERY_RET, subType);
+	} catch (const std::exception&) {
+		return false;
+	}
+	if (resp.size() < 6) return false;
+
+	const int left = (unsigned char)resp[2];
+	const int right = (unsigned char)resp[4];
+
+	// Both zero is still a real answer: both earbuds are docked (level 0 means "not reporting", not empty).
+	// Rejecting it would fall through to the DUAL2 and single probes, which time out on these models and
+	// stall the command queue for ~5s on every battery poll while the buds sit in the case.
+	std::lock_guard guard(this->_propertyMtx);
+	this->_hasDualBattery = true;
+	this->_hasBattery = true;
+	this->_batteryLeft = left > 0 ? left : -1;
+	this->_batteryRight = right > 0 ? right : -1;
+	this->_batteryLeftCharging = resp[3] == 1;
+	this->_batteryRightCharging = resp[5] == 1;
+	// Headline level: the emptier of the two earbuds that are actually reporting.
+	if (this->_batteryLeft >= 0 && this->_batteryRight >= 0)
+		this->_batteryLevel = std::min(this->_batteryLeft, this->_batteryRight);
+	else
+		this->_batteryLevel = std::max(this->_batteryLeft, this->_batteryRight); // -1 when both are docked
+	this->_batteryCharging = this->_batteryLeftCharging || this->_batteryRightCharging;
+	return true;
+}
+
+bool Headphones::_requestSingleBattery(unsigned char subType, int& levelOut, bool& chargingOut)
+{
+	Buffer resp;
+	try {
+		resp = this->_conn.sendCommandAndReadResponse(
+			{ (char)V2Command::BATTERY_GET, (char)subType }, V2Command::BATTERY_RET, subType);
+	} catch (const std::exception&) {
+		return false;
+	}
+	if (resp.size() < 4) return false;
+	levelOut = (unsigned char)resp[2];
+	chargingOut = resp[3] == 1;
+	return true;
+}
+
 void Headphones::requestBattery()
 {
 	if (this->_conn.getProtocolVersion() == SonyProtocolVersion::V1)
@@ -118,38 +184,54 @@ void Headphones::requestBattery()
 		return;
 	}
 
-	// Single battery (over-ear and most models): GET 22 00 -> RET 23 00 <level> <charging>
-	try {
-		auto resp = this->_conn.sendCommandAndReadResponse({ (char)V2Command::BATTERY_GET, 0x00 }, V2Command::BATTERY_RET, 0x00);
-		if (resp.size() >= 4) {
-			std::lock_guard guard(this->_propertyMtx);
-			this->_batteryLevel = (unsigned char)resp[2];
-			this->_batteryCharging = resp[3] == 1;
-			this->_hasBattery = true;
-			return; // found a single battery; don't waste time probing the TWS types
+	// A device only answers the battery sub-types it supports, and an unsupported inquiry costs a
+	// full recv timeout, so probe the layout this model is likely to use first. Crucially the dual
+	// probe must come before the single one on earbuds: some TWS models *do* answer the single
+	// inquiry (with a combined or zero level), and taking that answer would hide the per-earbud
+	// levels entirely.
+	if (this->_looksLikeEarbuds())
+	{
+		if (this->_requestDualBattery(V2Command::BATTERY_SUB_DUAL)
+			|| this->_requestDualBattery(V2Command::BATTERY_SUB_DUAL2))
+		{
+			int caseLevel = -1; bool caseCharging = false;
+			if (this->_requestSingleBattery(V2Command::BATTERY_SUB_CASE, caseLevel, caseCharging)) {
+				std::lock_guard guard(this->_propertyMtx);
+				// The case reports 0 while it's disconnected from the buds; keep the last known value.
+				if (caseLevel > 0) {
+					this->_batteryCase = caseLevel;
+					this->_batteryCaseCharging = caseCharging;
+				}
+			}
+			return;
 		}
-	} catch (...) {}
+	}
 
-	// TWS earbuds: dual L/R (22 09 -> 23 09 <Llvl> <Lchg> <Rlvl> <Rchg>) and case (22 0a -> 23 0a <lvl> <chg>).
-	try {
-		auto resp = this->_conn.sendCommandAndReadResponse({ (char)V2Command::BATTERY_GET, 0x09 }, V2Command::BATTERY_RET, 0x09);
-		if (resp.size() >= 6) {
-			std::lock_guard guard(this->_propertyMtx);
-			this->_hasDualBattery = true;
-			this->_batteryLeft = (unsigned char)resp[2];
-			this->_batteryRight = (unsigned char)resp[4];
-			this->_batteryLevel = std::min(this->_batteryLeft, this->_batteryRight);
-			this->_hasBattery = true;
-		}
-	} catch (...) {}
+	// Single battery (over-ear and most other models).
+	int level = -1; bool charging = false;
+	if (this->_requestSingleBattery(V2Command::BATTERY_SUB_SINGLE, level, charging)) {
+		std::lock_guard guard(this->_propertyMtx);
+		this->_batteryLevel = level;
+		this->_batteryCharging = charging;
+		this->_hasBattery = true;
+		return;
+	}
 
-	try {
-		auto resp = this->_conn.sendCommandAndReadResponse({ (char)V2Command::BATTERY_GET, 0x0a }, V2Command::BATTERY_RET, 0x0a);
-		if (resp.size() >= 4) {
-			std::lock_guard guard(this->_propertyMtx);
-			this->_batteryCase = (unsigned char)resp[2];
+	// Unrecognised name that turned out to be earbuds after all.
+	if (!this->_looksLikeEarbuds()) {
+		if (this->_requestDualBattery(V2Command::BATTERY_SUB_DUAL)
+			|| this->_requestDualBattery(V2Command::BATTERY_SUB_DUAL2))
+		{
+			int caseLevel = -1; bool caseCharging = false;
+			if (this->_requestSingleBattery(V2Command::BATTERY_SUB_CASE, caseLevel, caseCharging)) {
+				std::lock_guard guard(this->_propertyMtx);
+				if (caseLevel > 0) {
+					this->_batteryCase = caseLevel;
+					this->_batteryCaseCharging = caseCharging;
+				}
+			}
 		}
-	} catch (...) {}
+	}
 }
 
 bool Headphones::hasBattery() { std::lock_guard guard(this->_propertyMtx); return this->_hasBattery; }
@@ -169,6 +251,9 @@ bool Headphones::hasDualBattery() { std::lock_guard guard(this->_propertyMtx); r
 int Headphones::getBatteryLeft() { std::lock_guard guard(this->_propertyMtx); return this->_batteryLeft; }
 int Headphones::getBatteryRight() { std::lock_guard guard(this->_propertyMtx); return this->_batteryRight; }
 int Headphones::getBatteryCase() { std::lock_guard guard(this->_propertyMtx); return this->_batteryCase; }
+bool Headphones::isBatteryLeftCharging() { std::lock_guard guard(this->_propertyMtx); return this->_batteryLeftCharging; }
+bool Headphones::isBatteryRightCharging() { std::lock_guard guard(this->_propertyMtx); return this->_batteryRightCharging; }
+bool Headphones::isBatteryCaseCharging() { std::lock_guard guard(this->_propertyMtx); return this->_batteryCaseCharging; }
 
 void Headphones::requestEqualizer()
 {

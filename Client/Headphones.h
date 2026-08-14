@@ -49,16 +49,23 @@ public:
 	// Handshake the device expects before it answers inquiry (GET) commands.
 	void initDevice();
 
+	// Model name of the connected device (e.g. "WF-1000XM5"). Only a hint: it picks which battery
+	// layout to probe first, so set it before the first requestBattery() to save a timed-out inquiry.
+	void setDeviceName(const std::string& name);
+
 	// Battery. getBatteryLevel() returns -1 until requestBattery() succeeds.
 	// For TWS earbuds requestBattery() also fills the per-earbud + case levels (hasDualBattery()).
 	void requestBattery();
 	bool hasBattery();
-	int getBatteryLevel();
+	int getBatteryLevel();       // for earbuds: the emptier of the two
 	bool isBatteryCharging();
 	bool hasDualBattery();
 	int getBatteryLeft();   // -1 if n/a
 	int getBatteryRight();
 	int getBatteryCase();
+	bool isBatteryLeftCharging();
+	bool isBatteryRightCharging();
+	bool isBatteryCaseCharging();
 
 	// Equalizer. Wire subtypes and the custom-preset byte differ between protocol generations.
 	void requestEqualizer();
@@ -142,6 +149,15 @@ private:
 	int _batteryLeft = -1;
 	int _batteryRight = -1;
 	int _batteryCase = -1;
+	bool _batteryLeftCharging = false;
+	bool _batteryRightCharging = false;
+	bool _batteryCaseCharging = false;
+	std::string _deviceName;
+
+	bool _looksLikeEarbuds() const;
+	// Both return false if the device didn't answer that battery sub-type.
+	bool _requestDualBattery(unsigned char subType);
+	bool _requestSingleBattery(unsigned char subType, int& levelOut, bool& chargingOut);
 	EQ_PRESET _eqPreset = EQ_PRESET::OFF;
 	bool _hasEqualizer = false;
 	std::vector<int> _eqBands = { 0, 0, 0, 0, 0 };

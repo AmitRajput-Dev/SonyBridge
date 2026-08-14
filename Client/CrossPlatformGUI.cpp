@@ -6,6 +6,7 @@
 #include <vector>
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
 
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_PNG
@@ -194,6 +195,8 @@ void CrossPlatformGUI::_pumpConnectionState()
 			try { this->_headphones.requestAmbientState(); } catch (const std::exception&) {}
 			if (this->_isV2())
 			{
+				// Lets requestBattery() probe the per-earbud layout first on TWS models (WF-*/LinkBuds).
+				this->_headphones.setDeviceName(this->_connectedDevice.name);
 				try { this->_headphones.requestBattery(); } catch (const std::exception&) {}
 				try { this->_headphones.requestEqualizer(); } catch (const std::exception&) {}
 				try { this->_headphones.requestDsee(); } catch (const std::exception&) {}
@@ -382,9 +385,19 @@ void CrossPlatformGUI::_drawStatusHeader()
 
 	if (this->_headphones.hasDualBattery())
 	{
-		ImGui::Text("Battery   L %d%%    R %d%%", this->_headphones.getBatteryLeft(), this->_headphones.getBatteryRight());
+		// An earbud that isn't reporting (docked in the case / powered down) reads -1; show a dash.
+		auto budText = [](int level, bool charging) {
+			char buf[32];
+			if (level < 0) snprintf(buf, sizeof(buf), "--");
+			else snprintf(buf, sizeof(buf), "%d%%%s", level, charging ? "+" : "");
+			return std::string(buf);
+		};
+		ImGui::Text("Battery   L %s    R %s",
+			budText(this->_headphones.getBatteryLeft(), this->_headphones.isBatteryLeftCharging()).c_str(),
+			budText(this->_headphones.getBatteryRight(), this->_headphones.isBatteryRightCharging()).c_str());
 		if (this->_headphones.getBatteryCase() >= 0)
-			ImGui::Text("Case      %d%%", this->_headphones.getBatteryCase());
+			ImGui::Text("Case      %d%%%s", this->_headphones.getBatteryCase(),
+				this->_headphones.isBatteryCaseCharging() ? "  (charging)" : "");
 	}
 	else
 	{
