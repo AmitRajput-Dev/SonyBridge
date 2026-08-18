@@ -64,7 +64,18 @@ int MacOSBluetoothConnector::send(char* buf, size_t length)
 #ifdef SHC_DEBUG_PROTOCOL
     _debugHexDump("send", buf, length);
 #endif
-    [(__bridge IOBluetoothRFCOMMChannel*)rfcommchannel writeSync:(void*)buf length:length];
+    // Take a strong reference under the lock: the earbuds can drop the link at any moment (docking a bud
+    // in the case does it), and the run-loop thread clears rfcommchannel from rfcommChannelClosed. Without
+    // this, a poll already in flight would writeSync: to a freed channel and crash with EXC_BAD_ACCESS.
+    IOBluetoothRFCOMMChannel *chan = nil;
+    {
+        std::lock_guard<std::mutex> g(channelMtx);
+        chan = (__bridge IOBluetoothRFCOMMChannel*) rfcommchannel;
+    }
+    if (chan == nil || !chan.isOpen) {
+        throw RecoverableException("The headphones disconnected.", true);
+    }
+    [chan writeSync:(void*)buf length:length];
     return (int)length;
 }
 
@@ -126,8 +137,11 @@ void MacOSBluetoothConnector::connectToMac(MacOSBluetoothConnector* macOSBluetoo
         connectPromise.set_exception(excPtr);
         return;
     }
-    // store the channel
-    macOSBluetoothConnector->rfcommchannel = (__bridge void*) channel;
+    // store the channel (retained; released in closeConnection)
+    {
+        std::lock_guard<std::mutex> g(macOSBluetoothConnector->channelMtx);
+        macOSBluetoothConnector->rfcommchannel = (void*) CFBridgingRetain(channel);
+    }
     macOSBluetoothConnector->protocolVersion = protocolVersion;
 
     macOSBluetoothConnector->running = true;
@@ -172,9 +186,11 @@ int MacOSBluetoothConnector::recv(char* buf, size_t length)
     // wait for newly received data, but time out so an unanswered inquiry (probing an unsupported
     // feature) or a dropped link doesn't block the caller forever.
     std::unique_lock<std::mutex> g(receiveDataMutex);
-    bool gotData = receiveDataConditionVariable.wait_for(g, std::chrono::milliseconds(2500),
-        [this]{ return !receivedBytes.empty(); });
-    if (!gotData) {
+    // Also wake on disconnect, so a dropped link surfaces immediately instead of after the full timeout.
+    receiveDataConditionVariable.wait_for(g, std::chrono::milliseconds(2500),
+        [this]{ return !receivedBytes.empty() || !running; });
+    if (receivedBytes.empty()) {
+        if (!running) throw RecoverableException("The headphones disconnected.", true);
         throw RecoverableException("recv timed out", false);
     }
 
@@ -225,20 +241,37 @@ std::vector<BluetoothDevice> MacOSBluetoothConnector::getConnectedDevices()
 
 void MacOSBluetoothConnector::disconnect() noexcept
 {
-    // close connection
-    closeConnection();
+    // Clear running first: closeConnection() wakes any blocked recv(), and that waiter's predicate
+    // checks this flag, so it has to be false by the time the notify lands.
     running = false;
+    closeConnection();
     // notify the other thread that we are done disconnecting
     disconnectionConditionVariable.notify_all();
-    // wait for the thread to finish
-    uthread.join();
+    // wait for the thread to finish. The RFCOMM delegate callbacks run on uthread's own run loop, so
+    // rfcommChannelClosed -> disconnect() lands here on uthread itself; joining that would deadlock.
+    // Setting running=false above is enough to end its loop, so just let it unwind.
+    if (uthread.joinable()) {
+        if (uthread.get_id() != std::this_thread::get_id()) uthread.join();
+        else uthread.detach();
+    }
 }
 void MacOSBluetoothConnector::closeConnection() {
-    // get the channel
-    IOBluetoothRFCOMMChannel *chan = (__bridge IOBluetoothRFCOMMChannel*) rfcommchannel;
+    // Hand the retain over to ARC and clear the member under the lock, so any concurrent send()/recv()
+    // either sees the live channel or sees nil - never a dangling pointer.
+    IOBluetoothRFCOMMChannel *chan = nil;
+    {
+        std::lock_guard<std::mutex> g(channelMtx);
+        chan = (IOBluetoothRFCOMMChannel*) CFBridgingRelease(rfcommchannel);
+        rfcommchannel = nullptr;
+    }
+    if (chan == nil) return; // already closed
     [chan setDelegate: nil];
-    // close the channel
     [chan closeChannel];
+    // Wake anyone blocked in recv() so they observe the disconnect instead of waiting out the timeout.
+    {
+        std::lock_guard<std::mutex> g(receiveDataMutex);
+        receiveDataConditionVariable.notify_all();
+    }
 }
 
 
@@ -246,6 +279,7 @@ bool MacOSBluetoothConnector::isConnected() noexcept
 {
     if (!running)
         return false;
+    std::lock_guard<std::mutex> g(channelMtx);
     IOBluetoothRFCOMMChannel *chan = (__bridge IOBluetoothRFCOMMChannel*) rfcommchannel;
-    return chan.isOpen;
+    return chan != nil && chan.isOpen;
 }

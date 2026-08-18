@@ -5,6 +5,7 @@
 #include <utility>
 #include <string>
 #include <algorithm>
+#include <cctype>
 
 Headphones::Headphones(BluetoothWrapper& conn) : _conn(conn)
 {
@@ -85,38 +86,119 @@ void Headphones::initDevice()
 	);
 }
 
+void Headphones::setDeviceName(const std::string& name)
+{
+	std::lock_guard guard(this->_propertyMtx);
+	this->_deviceName = name;
+}
+
+// True for Sony's true-wireless earbuds, which report a battery per earbud instead of one for the
+// whole device. Only used to pick the probe order - an unrecognised name still finds both layouts,
+// just one timed-out inquiry slower.
+bool Headphones::_looksLikeEarbuds() const
+{
+	std::string name;
+	for (char c : this->_deviceName) name.push_back((char)std::tolower((unsigned char)c));
+	return name.find("wf-") != std::string::npos || name.find("linkbuds") != std::string::npos;
+}
+
+// Reads the per-earbud (and case) levels. Returns false if the device didn't answer this sub-type or
+// answered with nothing usable, so the caller can fall back to the other layout.
+bool Headphones::_requestDualBattery(unsigned char subType)
+{
+	Buffer resp;
+	try {
+		resp = this->_conn.sendCommandAndReadResponse(
+			{ (char)V2Command::BATTERY_GET, (char)subType }, V2Command::BATTERY_RET, subType);
+	} catch (const std::exception&) {
+		return false;
+	}
+	if (resp.size() < 6) return false;
+
+	const int left = (unsigned char)resp[2];
+	const int right = (unsigned char)resp[4];
+	// Both zero means neither earbud is reporting - an empty answer, not a pair of flat batteries.
+	if (left == 0 && right == 0) return false;
+
+	std::lock_guard guard(this->_propertyMtx);
+	this->_hasDualBattery = true;
+	this->_batteryLeft = left > 0 ? left : -1;
+	this->_batteryRight = right > 0 ? right : -1;
+	this->_batteryLeftCharging = resp[3] == 1;
+	this->_batteryRightCharging = resp[5] == 1;
+	// Headline level: the emptier of the two earbuds that are actually reporting.
+	if (this->_batteryLeft >= 0 && this->_batteryRight >= 0)
+		this->_batteryLevel = std::min(this->_batteryLeft, this->_batteryRight);
+	else
+		this->_batteryLevel = std::max(this->_batteryLeft, this->_batteryRight);
+	this->_batteryCharging = this->_batteryLeftCharging || this->_batteryRightCharging;
+	return true;
+}
+
+bool Headphones::_requestSingleBattery(unsigned char subType, int& levelOut, bool& chargingOut)
+{
+	Buffer resp;
+	try {
+		resp = this->_conn.sendCommandAndReadResponse(
+			{ (char)V2Command::BATTERY_GET, (char)subType }, V2Command::BATTERY_RET, subType);
+	} catch (const std::exception&) {
+		return false;
+	}
+	if (resp.size() < 4) return false;
+	levelOut = (unsigned char)resp[2];
+	chargingOut = resp[3] == 1;
+	return true;
+}
+
 void Headphones::requestBattery()
 {
-	// Single battery (over-ear and most models): GET 22 00 -> RET 23 00 <level> <charging>
-	try {
-		auto resp = this->_conn.sendCommandAndReadResponse({ (char)V2Command::BATTERY_GET, 0x00 }, V2Command::BATTERY_RET, 0x00);
-		if (resp.size() >= 4) {
-			std::lock_guard guard(this->_propertyMtx);
-			this->_batteryLevel = (unsigned char)resp[2];
-			this->_batteryCharging = resp[3] == 1;
-			return; // found a single battery; don't waste time probing the TWS types
+	// A device only answers the battery sub-types it supports, and an unsupported inquiry costs a
+	// full recv timeout, so probe the layout this model is likely to use first. Crucially the dual
+	// probe must come before the single one on earbuds: some TWS models *do* answer the single
+	// inquiry (with a combined or zero level), and taking that answer would hide the per-earbud
+	// levels entirely.
+	if (this->_looksLikeEarbuds())
+	{
+		if (this->_requestDualBattery(V2Command::BATTERY_SUB_DUAL)
+			|| this->_requestDualBattery(V2Command::BATTERY_SUB_DUAL2))
+		{
+			int caseLevel = -1; bool caseCharging = false;
+			if (this->_requestSingleBattery(V2Command::BATTERY_SUB_CASE, caseLevel, caseCharging)) {
+				std::lock_guard guard(this->_propertyMtx);
+				// The case reports 0 while it's disconnected from the buds; keep the last known value.
+				if (caseLevel > 0) {
+					this->_batteryCase = caseLevel;
+					this->_batteryCaseCharging = caseCharging;
+				}
+			}
+			return;
 		}
-	} catch (...) {}
+	}
 
-	// TWS earbuds: dual L/R (22 09 -> 23 09 <Llvl> <Lchg> <Rlvl> <Rchg>) and case (22 0a -> 23 0a <lvl> <chg>).
-	try {
-		auto resp = this->_conn.sendCommandAndReadResponse({ (char)V2Command::BATTERY_GET, 0x09 }, V2Command::BATTERY_RET, 0x09);
-		if (resp.size() >= 6) {
-			std::lock_guard guard(this->_propertyMtx);
-			this->_hasDualBattery = true;
-			this->_batteryLeft = (unsigned char)resp[2];
-			this->_batteryRight = (unsigned char)resp[4];
-			this->_batteryLevel = std::min(this->_batteryLeft, this->_batteryRight);
-		}
-	} catch (...) {}
+	// Single battery (over-ear and most other models).
+	int level = -1; bool charging = false;
+	if (this->_requestSingleBattery(V2Command::BATTERY_SUB_SINGLE, level, charging)) {
+		std::lock_guard guard(this->_propertyMtx);
+		this->_batteryLevel = level;
+		this->_batteryCharging = charging;
+		return;
+	}
 
-	try {
-		auto resp = this->_conn.sendCommandAndReadResponse({ (char)V2Command::BATTERY_GET, 0x0a }, V2Command::BATTERY_RET, 0x0a);
-		if (resp.size() >= 4) {
-			std::lock_guard guard(this->_propertyMtx);
-			this->_batteryCase = (unsigned char)resp[2];
+	// Unrecognised name that turned out to be earbuds after all.
+	if (!this->_looksLikeEarbuds()) {
+		if (this->_requestDualBattery(V2Command::BATTERY_SUB_DUAL)
+			|| this->_requestDualBattery(V2Command::BATTERY_SUB_DUAL2))
+		{
+			int caseLevel = -1; bool caseCharging = false;
+			if (this->_requestSingleBattery(V2Command::BATTERY_SUB_CASE, caseLevel, caseCharging)) {
+				std::lock_guard guard(this->_propertyMtx);
+				if (caseLevel > 0) {
+					this->_batteryCase = caseLevel;
+					this->_batteryCaseCharging = caseCharging;
+				}
+			}
 		}
-	} catch (...) {}
+	}
 }
 
 int Headphones::getBatteryLevel()
@@ -133,6 +215,9 @@ bool Headphones::hasDualBattery() { return this->_hasDualBattery; }
 int Headphones::getBatteryLeft() { return this->_batteryLeft; }
 int Headphones::getBatteryRight() { return this->_batteryRight; }
 int Headphones::getBatteryCase() { return this->_batteryCase; }
+bool Headphones::isBatteryLeftCharging() { return this->_batteryLeftCharging; }
+bool Headphones::isBatteryRightCharging() { return this->_batteryRightCharging; }
+bool Headphones::isBatteryCaseCharging() { return this->_batteryCaseCharging; }
 
 void Headphones::requestEqualizer()
 {
@@ -171,8 +256,22 @@ void Headphones::setEqualizerPreset(EQ_PRESET preset)
 		(char)static_cast<unsigned char>(preset),
 		0x00
 	});
-	std::lock_guard guard(this->_propertyMtx);
-	this->_eqPreset = preset;
+	{
+		std::lock_guard guard(this->_propertyMtx);
+		this->_eqPreset = preset;
+	}
+	// The band values that go with the new preset live on the device, not here: selecting MANUAL restores
+	// the custom curve the user last stored on the headphones, and every other preset has its own fixed
+	// curve. Without this read-back the cached bands stay whatever the *previous* preset had, so switching
+	// to Manual showed the wrong slider positions. A failed read-back mustn't fail the write that already
+	// went through - the cached preset above is still correct, only the bands would be stale.
+	try
+	{
+		this->requestEqualizer();
+	}
+	catch (const std::exception&)
+	{
+	}
 }
 
 void Headphones::setEqualizerCustom(int clearBass, const std::vector<int>& bands)
@@ -250,7 +349,9 @@ void Headphones::requestAmbientState()
 	if (protocolVersion == SonyProtocolVersion::V2)
 	{
 		// GET: 66 17  ->  RET: 67 17 01 <effect> <settingType 0=NC/1=Ambient> <voice> <level>
-		auto resp = this->_conn.sendCommandAndReadResponse({ 0x66, 0x17 }, 0x67);
+		// Match the sub-type too: 0x67 also carries unsolicited notifications with a different layout,
+		// and accepting one of those parsed <effect>/<level> out of unrelated bytes.
+		auto resp = this->_conn.sendCommandAndReadResponse({ 0x66, 0x17 }, 0x67, 0x17);
 		if (resp.size() >= 7)
 		{
 			bool on = resp[3] != 0;
@@ -258,10 +359,17 @@ void Headphones::requestAmbientState()
 			bool voice = resp[5] != 0;
 			int level = (unsigned char)resp[6];
 			std::lock_guard guard(this->_propertyMtx);
-			// Update both current and desired so the UI reflects reality and isChanged() stays false.
-			this->_ambientSoundControl.current = this->_ambientSoundControl.desired = on;
-			this->_asmLevel.current = this->_asmLevel.desired = ambient ? level : 0;
-			this->_focusOnVoice.current = this->_focusOnVoice.desired = voice;
+			// A change the user just made may not be on the wire yet - the UI writes the desired values
+			// and only then queues the send - and this reply was produced before it. Adopting it would
+			// both revert the user's choice and clear the pending change (isChanged() goes false), so the
+			// command would never be sent at all. Leave everything alone until setChanges() has flushed it.
+			if (this->_ambientSoundControl.isFulfilled() && this->_asmLevel.isFulfilled() && this->_focusOnVoice.isFulfilled())
+			{
+				// Update both current and desired so the UI reflects reality and isChanged() stays false.
+				this->_ambientSoundControl.current = this->_ambientSoundControl.desired = on;
+				this->_asmLevel.current = this->_asmLevel.desired = ambient ? level : 0;
+				this->_focusOnVoice.current = this->_focusOnVoice.desired = voice;
+			}
 		}
 	}
 	else
@@ -336,6 +444,25 @@ void Headphones::probeCapabilities()
 		auto r = this->_conn.sendCommandAndReadResponse({ (char)V2Command::BTNMODE_GET, (char)V2Command::SUB_SPEAK_TO_CHAT }, V2Command::BTNMODE_RET, V2Command::SUB_SPEAK_TO_CHAT);
 		if (r.size() >= 3) { std::lock_guard g(this->_propertyMtx); this->_speakToChat = (r[2] == 0); this->_hasSpeakToChat = true; }
 	} catch (...) {}
+
+	// Sound quality mode. A model exposes it under exactly one sub-type - LDAC-capable devices
+	// (WF/WH-1000XM*) answer the LDAC variant, the rest the plain one - so probe both and keep whichever
+	// replied. Both share the same 3-byte layout: RET e7 <sub> <PRIOR_MODE>.
+	for (unsigned char sub : { V2Command::SUB_CONNECTION_MODE_LDAC, V2Command::SUB_CONNECTION_MODE })
+	{
+		try {
+			auto r = this->_conn.sendCommandAndReadResponse({ (char)V2Command::AUDIO_GET, (char)sub }, V2Command::AUDIO_RET, sub);
+			// Only 0x00/0x01 are modes we can round-trip; anything else means we've misread the layout.
+			if (r.size() >= 3 && (r[2] == 0x00 || r[2] == 0x01))
+			{
+				std::lock_guard g(this->_propertyMtx);
+				this->_soundQualityModeSubType = sub;
+				this->_soundQualityMode = (PRIOR_MODE)(unsigned char)r[2];
+				this->_hasSoundQualityMode = true;
+				break;
+			}
+		} catch (...) {}
+	}
 }
 
 bool Headphones::hasAutoPowerOff() { return this->_hasAutoPowerOff; }
@@ -371,6 +498,30 @@ void Headphones::setAdaptiveVolume(bool enabled)
 	this->_conn.sendCommand({ (char)V2Command::BTNMODE_SET, (char)V2Command::SUB_ADAPTIVE_VOLUME, (char)(enabled ? 0x00 : 0x01) });
 	std::lock_guard guard(this->_propertyMtx);
 	this->_adaptiveVolume = enabled;
+}
+
+bool Headphones::hasSoundQualityMode() { return this->_hasSoundQualityMode; }
+PRIOR_MODE Headphones::getSoundQualityMode() { return this->_soundQualityMode; }
+void Headphones::setSoundQualityMode(PRIOR_MODE mode)
+{
+	if (!this->_hasSoundQualityMode) return;
+	// SET: e8 <sub> <PRIOR_MODE>, on the same sub-type the probe found.
+	// Fire-and-forget on purpose: the device tears the A2DP link down to re-negotiate the codec, which
+	// takes the RFCOMM channel with it, so waiting for a reply here would just time out.
+	this->_conn.sendCommand({ (char)V2Command::AUDIO_SET, (char)this->_soundQualityModeSubType, (char)mode });
+	std::lock_guard guard(this->_propertyMtx);
+	this->_soundQualityMode = mode;
+}
+
+// requestAmbientState() deliberately refuses to adopt device state while a change is pending, so a write
+// that never reached the device would otherwise block the read-back for the rest of the session - the UI
+// would freeze on a value the headphones never took. Dropping the pending change lets polling resume.
+void Headphones::discardAmbientChanges()
+{
+	std::lock_guard guard(this->_propertyMtx);
+	this->_ambientSoundControl.desired = this->_ambientSoundControl.current;
+	this->_asmLevel.desired = this->_asmLevel.current;
+	this->_focusOnVoice.desired = this->_focusOnVoice.current;
 }
 
 bool Headphones::isChanged()

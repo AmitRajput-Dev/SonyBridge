@@ -37,15 +37,22 @@ public:
 	// Handshake the device expects before it answers inquiry (GET) commands on the v2 protocol.
 	void initDevice();
 
+	// Model name of the connected device (e.g. "WF-1000XM5"). Only a hint: it picks which battery
+	// layout to probe first, so set it before the first requestBattery() to save a timed-out inquiry.
+	void setDeviceName(const std::string& name);
+
 	// Battery (v2 inquiry). getBatteryLevel() returns -1 until requestBattery() succeeds.
 	// For TWS earbuds requestBattery() also fills the per-earbud + case levels (hasDualBattery()).
 	void requestBattery();
-	int getBatteryLevel();
+	int getBatteryLevel();       // for earbuds: the emptier of the two
 	bool isBatteryCharging();
 	bool hasDualBattery();
 	int getBatteryLeft();   // -1 if n/a
 	int getBatteryRight();
 	int getBatteryCase();
+	bool isBatteryLeftCharging();
+	bool isBatteryRightCharging();
+	bool isBatteryCaseCharging();
 
 	// Equalizer (v2). requestEqualizer() reads current state; setEqualizerPreset() pushes a preset immediately.
 	void requestEqualizer();
@@ -86,8 +93,19 @@ public:
 	bool getAdaptiveVolume();
 	void setAdaptiveVolume(bool enabled);
 
+	// Sound quality mode: prioritise sound quality vs. a stable connection. Changing it makes the
+	// headphones re-negotiate the A2DP link, so the RFCOMM connection drops right after the write -
+	// callers should expect a disconnect rather than treat it as a failure.
+	bool hasSoundQualityMode();
+	PRIOR_MODE getSoundQualityMode();
+	void setSoundQualityMode(PRIOR_MODE mode);
+
 	bool isChanged();
 	void setChanges();
+
+	// Rolls a failed ambient/NC write back to the last known device state. Must be called when
+	// setChanges() throws - see the comment on the definition.
+	void discardAmbientChanges();
 private:
 	Property<bool> _ambientSoundControl = { 0 };
 	Property<bool> _focusOnVoice = { 0 };
@@ -101,6 +119,15 @@ private:
 	int _batteryLeft = -1;
 	int _batteryRight = -1;
 	int _batteryCase = -1;
+	bool _batteryLeftCharging = false;
+	bool _batteryRightCharging = false;
+	bool _batteryCaseCharging = false;
+	std::string _deviceName;
+
+	bool _looksLikeEarbuds() const;
+	// Both return false if the device didn't answer that battery sub-type.
+	bool _requestDualBattery(unsigned char subType);
+	bool _requestSingleBattery(unsigned char subType, int& levelOut, bool& chargingOut);
 	EQ_PRESET _eqPreset = EQ_PRESET::OFF;
 	std::vector<int> _eqBands = { 0, 0, 0, 0, 0 };
 	int _eqClearBass = 0;
@@ -111,6 +138,10 @@ private:
 	bool _hasCodec = false; std::string _codec;
 	bool _hasSpeakToChat = false; bool _speakToChat = false;
 	bool _hasAdaptiveVolume = false; bool _adaptiveVolume = false;
+	// Which AUDIO sub-type this device answered on: SET has to go back out on the same one.
+	bool _hasSoundQualityMode = false;
+	unsigned char _soundQualityModeSubType = V2Command::SUB_CONNECTION_MODE;
+	PRIOR_MODE _soundQualityMode = PRIOR_MODE::SOUND_QUALITY;
 
 	std::mutex _propertyMtx;
 

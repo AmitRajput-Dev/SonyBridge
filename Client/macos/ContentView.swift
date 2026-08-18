@@ -79,6 +79,9 @@ struct ContentView: View {
                     equalizerCard
                     dseeCard
                 }
+                if model.hasSoundQualityMode {
+                    soundQualityCard
+                }
                 if model.hasAdaptiveVolume || model.hasSpeakToChat || model.hasAutoPowerOff {
                     settingsCard
                 }
@@ -149,12 +152,13 @@ struct ContentView: View {
 
             HStack(spacing: 7) {
                 if model.hasDualBattery {
-                    Image(systemName: "battery.100")
-                        .font(.system(size: 13))
-                        .foregroundColor(Theme.accent)
-                    Text("L \(model.batteryLeft)%  R \(model.batteryRight)%")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(Theme.secondary)
+                    // Earbuds report a battery each, plus the case when it's connected. An earbud that
+                    // isn't reporting (docked / powered down) comes through as -1 and is left out.
+                    budBattery("L", model.batteryLeft, charging: model.batteryLeftCharging)
+                    budBattery("R", model.batteryRight, charging: model.batteryRightCharging)
+                    if model.batteryCase >= 0 {
+                        budBattery("Case", model.batteryCase, charging: model.batteryCaseCharging)
+                    }
                 } else if model.batteryLevel >= 0 {
                     Image(systemName: model.batteryCharging ? "bolt.fill" : batterySymbol(model.batteryLevel))
                         .font(.system(size: 13))
@@ -323,6 +327,50 @@ struct ContentView: View {
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
+    private var soundQualityCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Bluetooth Connection")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(.white)
+                Spacer()
+                if !model.codec.isEmpty {
+                    Text(model.codec)
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .foregroundColor(Theme.secondary)
+                }
+            }
+            HStack(spacing: 8) {
+                priorityChip("Sound Quality", selected: model.prioritizeSoundQuality) {
+                    model.setPrioritizeSoundQuality(true)
+                }
+                priorityChip("Stable Connection", selected: !model.prioritizeSoundQuality) {
+                    model.setPrioritizeSoundQuality(false)
+                }
+            }
+            Text("The headphones reconnect to apply this.")
+                .font(.system(size: 11))
+                .foregroundColor(Theme.secondary)
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.card)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private func priorityChip(_ name: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(name)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(selected ? .white : Theme.secondary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(selected ? Theme.accent : Theme.cardHi)
+                .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+
     private func eqChip(_ name: String, _ code: Int) -> some View {
         let selected = model.eqPreset == code
         return Button(action: { model.setEqualizer(code) }) {
@@ -396,8 +444,11 @@ struct ContentView: View {
                 .padding(.bottom, 10)
             aboutRow("Status", model.connected ? "Connected" : "Disconnected")
             if model.hasDualBattery {
-                aboutRow("Battery L / R", "\(model.batteryLeft)% / \(model.batteryRight)%")
-                if model.batteryCase >= 0 { aboutRow("Case", "\(model.batteryCase)%") }
+                aboutRow("Battery L", batteryText(model.batteryLeft, model.batteryLeftCharging))
+                aboutRow("Battery R", batteryText(model.batteryRight, model.batteryRightCharging))
+                if model.batteryCase >= 0 {
+                    aboutRow("Case", batteryText(model.batteryCase, model.batteryCaseCharging))
+                }
             } else if model.batteryLevel >= 0 {
                 aboutRow("Battery", "\(model.batteryLevel)%\(model.batteryCharging ? " (charging)" : "")")
             }
@@ -415,6 +466,11 @@ struct ContentView: View {
         .background(Theme.card)
     }
 
+    private func batteryText(_ level: Int, _ charging: Bool) -> String {
+        guard level >= 0 else { return "—" }
+        return "\(level)%\(charging ? " (charging)" : "")"
+    }
+
     private func aboutRow(_ label: String, _ value: String) -> some View {
         HStack {
             Text(label).font(.system(size: 12)).foregroundColor(Theme.secondary)
@@ -428,6 +484,21 @@ struct ContentView: View {
     private func deviceImage() -> NSImage? {
         let slug = model.deviceName.lowercased().replacingOccurrences(of: " ", with: "-")
         return NSImage(named: slug)
+    }
+
+    // One "L 82%" chip, with a bolt in place of the battery glyph while that unit is charging.
+    // A docked/powered-down earbud reports no level; show it dimmed as "R --" rather than dropping the
+    // chip, so it reads as "in the case" instead of looking like the app lost track of it.
+    private func budBattery(_ label: String, _ level: Int, charging: Bool) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: level < 0 ? "battery.0" : (charging ? "bolt.fill" : batterySymbol(level)))
+                .font(.system(size: 12))
+                .foregroundColor(level < 0 ? Theme.secondary.opacity(0.5)
+                                 : (level <= 20 && !charging ? .red.opacity(0.9) : Theme.accent))
+            Text(level < 0 ? "\(label) --" : "\(label) \(level)%")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(Theme.secondary.opacity(level < 0 ? 0.5 : 1.0))
+        }
     }
 
     private func batterySymbol(_ level: Int) -> String {

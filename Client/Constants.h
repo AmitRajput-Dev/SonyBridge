@@ -33,15 +33,48 @@ namespace V2Command
 {
 	inline constexpr unsigned char INIT_REQUEST = 0x00; // payload: 00 00
 	inline constexpr unsigned char INIT_REPLY   = 0x01; // reply: 01 ... (8 bytes total => v2 device)
-	inline constexpr unsigned char BATTERY_GET  = 0x22; // payload: 22 <type: 00=single>
-	inline constexpr unsigned char BATTERY_RET  = 0x23; // reply: 23 <type> <level 0-100> <charging 0/1>
-	inline constexpr unsigned char BATTERY_NTFY = 0x25; // notify: 25 <type> <level> <charging>
+	inline constexpr unsigned char BATTERY_GET  = 0x22; // payload: 22 <sub-type>
+	inline constexpr unsigned char BATTERY_RET  = 0x23; // reply: 23 <sub-type> <level 0-100> <charging 0/1>
+	inline constexpr unsigned char BATTERY_NTFY = 0x25; // notify: 25 <sub-type> <level> <charging>
+	// Battery inquiry sub-types (payload byte 1). A device answers only the ones it actually has, so
+	// these have to be probed. TWS earbuds report DUAL (or DUAL2 on the WF-C5xx/C700N line) plus CASE;
+	// everything else reports SINGLE. Values and the DUAL byte layout match GadgetBridge's
+	// SonyProtocolImplV2.encodeBatteryType() / handleBattery().
+	inline constexpr unsigned char BATTERY_SUB_SINGLE = 0x00; // RET 23 00 <level> <charging>
+	inline constexpr unsigned char BATTERY_SUB_DUAL2  = 0x01; // WF-C500 / WF-C510 / WF-C700N
+	inline constexpr unsigned char BATTERY_SUB_DUAL   = 0x09; // WF-1000XM4 / WF-1000XM5 / LinkBuds
+	inline constexpr unsigned char BATTERY_SUB_CASE   = 0x0a; // RET 23 0a <level> <charging>
+	// DUAL/DUAL2 reply: 23 <sub> <Llvl> <Lchg> <Rlvl> <Rchg>. A level of 0 means that earbud isn't
+	// reporting (docked in the case / powered down) rather than "empty" - treat it as unknown.
+	//
+	// The reply can be LONGER than the reference layout, so size checks must be lower bounds, never
+	// equality. Captured from a WF-1000XM5 (fw 6.1.0), both earbuds out of the case and full:
+	//   send 22 09  ->  23 09 64 00 64 00 64 64   (8 bytes; documented layout is 6)
+	//   send 22 0a  ->  23 0a 64 00 1e            (5 bytes; documented layout is 4)
+	// Confirmed on hardware by docking one earbud and watching the frames change:
+	//   right earbud in the case  ->  23 09 64 00 00 00 64 64   (byte [4] = R went 0x64 -> 0x00)
+	//   right earbud back out     ->  23 09 64 00 64 00 64 64
+	// So bytes [2]/[4] really are the L/R levels, as in the reference layout. The trailing bytes stayed
+	// fixed (0x64 0x64 on 22 09, 0x1e on 22 0a) across that change, which rules them out as per-earbud
+	// levels but leaves their meaning unknown - don't reuse them without a sample that moves them.
 	inline constexpr unsigned char EQ_GET       = 0x56; // payload: 56 00
 	inline constexpr unsigned char EQ_RET       = 0x57; // reply: 57 00 <preset> 06 <bass+10> <b1..b5 +10>
 	inline constexpr unsigned char EQ_SET       = 0x58; // preset: 58 00 <preset> 00 ; custom: 58 00 A0 06 <bass+10> <b1..b5 +10>
-	inline constexpr unsigned char DSEE_GET     = 0xe6; // payload: e6 01
-	inline constexpr unsigned char DSEE_RET     = 0xe7; // reply: e7 01 <enabled 0/1>
-	inline constexpr unsigned char DSEE_SET     = 0xe8; // payload: e8 01 <enabled 0/1>
+	// AUDIO parameter family. The opcode trio is shared by every audio parameter; the sub-type byte
+	// (payload[1]) picks which one, so DSEE and the sound-quality mode differ only in that byte.
+	inline constexpr unsigned char AUDIO_GET    = 0xe6; // GET e6 <sub>      -> RET e7 <sub> <value>
+	inline constexpr unsigned char AUDIO_RET    = 0xe7;
+	inline constexpr unsigned char AUDIO_SET    = 0xe8; // SET e8 <sub> <value>
+	inline constexpr unsigned char DSEE_GET     = AUDIO_GET; // payload: e6 01
+	inline constexpr unsigned char DSEE_RET     = AUDIO_RET; // reply: e7 01 <enabled 0/1>
+	inline constexpr unsigned char DSEE_SET     = AUDIO_SET; // payload: e8 01 <enabled 0/1>
+	// AUDIO sub-types (Sony's AudioInquiredType). Only the ones we actually send are listed.
+	inline constexpr unsigned char SUB_CONNECTION_MODE      = 0x00; // sound quality mode, plain
+	inline constexpr unsigned char SUB_UPSCALING            = 0x01; // DSEE
+	inline constexpr unsigned char SUB_CONNECTION_MODE_LDAC = 0x02; // same, on LDAC-capable models
+	// Deliberately NOT sent: 0x05 (CONNECTION_MODE_CLASSIC_AUDIO_LE_AUDIO). Its SET carries a fourth byte
+	// that also switches the device between Classic and LE Audio, which would drop the link for reasons
+	// the user didn't ask for. Devices that only answer 0x05 simply report the feature as unsupported.
 	inline constexpr unsigned char FW_GET       = 0x04; // payload: 04 02  -> RET 05 02 <ascii version...>
 	inline constexpr unsigned char FW_RET       = 0x05;
 	inline constexpr unsigned char CODEC_GET    = 0x12; // payload: 12 02  -> RET 13 02 <codec>
@@ -56,6 +89,15 @@ namespace V2Command
 	inline constexpr unsigned char SUB_ADAPTIVE_VOLUME = 0x0a;
 	inline constexpr unsigned char SUB_SPEAK_TO_CHAT   = 0x0c;
 }
+
+// Sound quality mode ("Bluetooth connection quality" in the Sony app) - the value byte of the
+// AUDIO CONNECTION_MODE sub-types. Sony's PriorMode enum also has LOW_LATENCY_PRIOR_BETA (0x02), which
+// no shipping model exposes in its app, so we don't offer it.
+enum class PRIOR_MODE : unsigned char
+{
+	SOUND_QUALITY = 0x00,
+	STABLE_CONNECTION = 0x01
+};
 
 // v2 equalizer preset ids (byte value sent/received at EQ payload[2]).
 enum class EQ_PRESET : unsigned char

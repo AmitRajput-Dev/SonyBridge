@@ -26,6 +26,9 @@ final class HeadphonesModel: ObservableObject {
     @Published var batteryLeft = -1
     @Published var batteryRight = -1
     @Published var batteryCase = -1
+    @Published var batteryLeftCharging = false
+    @Published var batteryRightCharging = false
+    @Published var batteryCaseCharging = false
     @Published var eqPreset = 0
     @Published var supportsEqualizer = false
     @Published var eqBands = [0, 0, 0, 0, 0]
@@ -40,6 +43,8 @@ final class HeadphonesModel: ObservableObject {
     @Published var speakToChat = false
     @Published var hasAdaptiveVolume = false
     @Published var adaptiveVolume = false
+    @Published var hasSoundQualityMode = false
+    @Published var prioritizeSoundQuality = true
     @Published var deviceMac = ""
     @Published var protocolVersion = ""
 
@@ -47,6 +52,8 @@ final class HeadphonesModel: ObservableObject {
 
     private var pollTimer: Timer?
     private var dynamicTimer: Timer?
+    // Set when we issue a write that we know makes the device drop the link on purpose.
+    private var expectingLinkReset = false
 
     func connect() {
         connecting = true
@@ -69,12 +76,7 @@ final class HeadphonesModel: ObservableObject {
 
     func refreshStatus() {
         bridge.refreshStatus {
-            self.batteryLevel = self.bridge.batteryLevel
-            self.batteryCharging = self.bridge.batteryCharging
-            self.hasDualBattery = self.bridge.hasDualBattery
-            self.batteryLeft = self.bridge.batteryLeft
-            self.batteryRight = self.bridge.batteryRight
-            self.batteryCase = self.bridge.batteryCase
+            self.syncBatteryFromBridge()
             self.eqPreset = self.bridge.eqPreset
             self.clearBass = self.bridge.clearBass
             self.dsee = self.bridge.dsee
@@ -87,7 +89,21 @@ final class HeadphonesModel: ObservableObject {
             self.speakToChat = self.bridge.speakToChat
             self.hasAdaptiveVolume = self.bridge.hasAdaptiveVolume
             self.adaptiveVolume = self.bridge.adaptiveVolume
+            self.hasSoundQualityMode = self.bridge.hasSoundQualityMode
+            self.prioritizeSoundQuality = self.bridge.prioritizeSoundQuality
         }
+    }
+
+    private func syncBatteryFromBridge() {
+        batteryLevel = bridge.batteryLevel
+        batteryCharging = bridge.batteryCharging
+        hasDualBattery = bridge.hasDualBattery
+        batteryLeft = bridge.batteryLeft
+        batteryRight = bridge.batteryRight
+        batteryCase = bridge.batteryCase
+        batteryLeftCharging = bridge.batteryLeftCharging
+        batteryRightCharging = bridge.batteryRightCharging
+        batteryCaseCharging = bridge.batteryCaseCharging
     }
 
     func setAutoPowerOff(_ index: Int) {
@@ -108,19 +124,36 @@ final class HeadphonesModel: ObservableObject {
         bridge.setAdaptiveVolume(on) { ok, error in if !ok, let e = error { self.errorMessage = e } }
     }
 
+    func setPrioritizeSoundQuality(_ on: Bool) {
+        prioritizeSoundQuality = on
+        errorMessage = nil
+        // The headphones re-negotiate the audio link for the new priority, which drops RFCOMM with it.
+        // Arm the connection watcher so that shows up as an explanation rather than as a bare failure.
+        expectingLinkReset = true
+        bridge.setPrioritizeSoundQuality(on) { ok, error in
+            if !ok {
+                self.expectingLinkReset = false
+                self.prioritizeSoundQuality = self.bridge.prioritizeSoundQuality
+                if let error = error { self.errorMessage = error }
+            }
+        }
+    }
+
     // Poll the button-changeable state so the app stays in sync when you use the headphone's own controls.
     private func startDynamicPolling() {
         stopDynamicPolling()
         dynamicTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
             guard let self = self, self.connected else { return }
             self.bridge.refreshDynamic {
+                // Only publish what refreshDynamic actually re-read: ambient/NC state and the battery.
+                // The EQ and DSEE values used to be assigned here too, but nothing re-reads them on this
+                // path - they came straight back from the C++ cache, which is only updated once a write
+                // succeeds. So a write that failed had its control snap back to the old value two
+                // seconds later, and dragging an EQ slider fought this timer.
                 self.mode = self.bridge.mode
                 let level = self.bridge.ambientLevel
                 if level > 0 { self.ambientLevel = level }
-                self.eqPreset = self.bridge.eqPreset
-                self.clearBass = self.bridge.clearBass
-                self.dsee = self.bridge.dsee
-                self.eqBands = (0..<5).map { self.bridge.equalizerBand(at: $0) }
+                self.syncBatteryFromBridge()
             }
         }
     }
@@ -130,11 +163,23 @@ final class HeadphonesModel: ObservableObject {
         dynamicTimer = nil
     }
 
+    // The controls below update optimistically and are corrected here if the write failed, rather than
+    // being silently overwritten by the next poll tick.
     func setEqualizer(_ preset: Int) {
         eqPreset = preset
         errorMessage = nil
         bridge.setEqualizerPreset(preset) { ok, error in
-            if !ok, let error = error { self.errorMessage = error }
+            if !ok {
+                self.eqPreset = self.bridge.eqPreset
+                if let error = error { self.errorMessage = error }
+                return
+            }
+            // The bridge re-reads the EQ after the write, so this picks up the band values that belong to
+            // the preset just selected - in particular the custom curve the device restores for Manual,
+            // which is what the sliders below the chips show.
+            self.eqPreset = self.bridge.eqPreset
+            self.clearBass = self.bridge.clearBass
+            self.eqBands = (0..<5).map { self.bridge.equalizerBand(at: $0) }
         }
     }
 
@@ -142,6 +187,8 @@ final class HeadphonesModel: ObservableObject {
     func applyCustomEq() {
         eqPreset = 0xA0
         errorMessage = nil
+        // Deliberately no roll-back here: this fires continuously while a slider is dragged, and yanking
+        // the bands back mid-drag is the exact jumpiness we're fixing. The next drag event corrects it.
         bridge.setCustomEqualizerBass(clearBass, bands: eqBands.map { NSNumber(value: $0) }) { ok, error in
             if !ok, let error = error { self.errorMessage = error }
         }
@@ -151,7 +198,10 @@ final class HeadphonesModel: ObservableObject {
         dsee = on
         errorMessage = nil
         bridge.setDsee(on) { ok, error in
-            if !ok, let error = error { self.errorMessage = error }
+            if !ok {
+                self.dsee = self.bridge.dsee
+                if let error = error { self.errorMessage = error }
+            }
         }
     }
 
@@ -172,7 +222,10 @@ final class HeadphonesModel: ObservableObject {
             if self.connected && !self.bridge.connected {
                 self.connected = false
                 self.deviceName = ""
-                self.errorMessage = "Headphones disconnected."
+                self.errorMessage = self.expectingLinkReset
+                    ? "Sound quality mode changed — the headphones reconnect on their own. Connect again in a few seconds."
+                    : "Headphones disconnected."
+                self.expectingLinkReset = false
                 self.stopWatchingConnection()
                 self.stopDynamicPolling()
             }
@@ -202,11 +255,10 @@ final class HeadphonesModel: ObservableObject {
     private func pushState() {
         errorMessage = nil
         bridge.applyMode(mode, level: ambientLevel, focusVoice: focusOnVoice) { ok, error in
-            if ok {
-                self.syncFromBridge()
-            } else if let error = error {
-                self.errorMessage = error
-            }
+            // Sync either way: on failure the bridge has rolled the pending change back, so this shows
+            // what the headphones are actually set to instead of leaving the UI lying.
+            self.syncFromBridge()
+            if !ok, let error = error { self.errorMessage = error }
         }
     }
 

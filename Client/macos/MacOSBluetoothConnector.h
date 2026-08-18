@@ -37,6 +37,9 @@ public:
 
 private:
     void *rfcommDevice;
-    void *rfcommchannel;
+    // Retained (CFBridgingRetain) so the channel object stays alive as long as we hold the pointer, and
+    // guarded by channelMtx because the run-loop thread clears it on close while command threads send.
+    void *rfcommchannel = nullptr;
+    std::mutex channelMtx;
     std::thread uthread;
 };

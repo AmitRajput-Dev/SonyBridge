@@ -14,12 +14,17 @@
 // RecoverableException comes in transitively via BluetoothWrapper.h -> IBluetoothConnector.h -> Exceptions.h.
 // (Exceptions.h isn't a project file reference, so it can't be #included directly from this directory.)
 
+// The dynamic poll fires every 2s; re-read the battery every 15th tick (~30s), which is far more often
+// than a headphone battery meaningfully moves but cheap enough not to crowd out the ambient/NC polling.
+static const unsigned kBatteryPollEveryNTicks = 15;
+
 @implementation HeadphonesBridge {
     std::unique_ptr<BluetoothWrapper> _bt;
     std::unique_ptr<Headphones> _hp;
     NSString *_deviceName;
     NSString *_deviceMac;
     BOOL _initialized;
+    unsigned _dynamicTick;
     // All user-initiated commands run on this SERIAL queue so quick successive taps reach the device in
     // order (a concurrent queue let them race and land out of order).
     dispatch_queue_t _cmdQueue;
@@ -90,6 +95,9 @@
 - (NSInteger)batteryLeft { return _hp ? _hp->getBatteryLeft() : -1; }
 - (NSInteger)batteryRight { return _hp ? _hp->getBatteryRight() : -1; }
 - (NSInteger)batteryCase { return _hp ? _hp->getBatteryCase() : -1; }
+- (BOOL)batteryLeftCharging { return _hp && _hp->isBatteryLeftCharging(); }
+- (BOOL)batteryRightCharging { return _hp && _hp->isBatteryRightCharging(); }
+- (BOOL)batteryCaseCharging { return _hp && _hp->isBatteryCaseCharging(); }
 
 - (NSInteger)eqPreset {
     return _hp ? (NSInteger)_hp->getEqualizerPreset() : 0;
@@ -121,6 +129,8 @@
 - (BOOL)speakToChat { return _hp && _hp->getSpeakToChat(); }
 - (BOOL)hasAdaptiveVolume { return _hp && _hp->hasAdaptiveVolume(); }
 - (BOOL)adaptiveVolume { return _hp && _hp->getAdaptiveVolume(); }
+- (BOOL)hasSoundQualityMode { return _hp && _hp->hasSoundQualityMode(); }
+- (BOOL)prioritizeSoundQuality { return _hp && _hp->getSoundQualityMode() == PRIOR_MODE::SOUND_QUALITY; }
 
 static BOOL SHCLooksLikeSonyHeadset(NSString *name) {
     if (name.length == 0) return NO;
@@ -181,6 +191,8 @@ static BOOL SHCLooksLikeSonyHeadset(NSString *name) {
     _deviceName = [device nameOrAddress];
     _deviceMac = [device addressString];
     _hp = std::make_unique<Headphones>(*_bt);
+    // Lets requestBattery() probe the per-earbud layout first on TWS models (WF-*/LinkBuds).
+    _hp->setDeviceName(_deviceName ? [_deviceName UTF8String] : "");
     completion(YES, nil);
 }
 
@@ -231,10 +243,16 @@ static BOOL SHCLooksLikeSonyHeadset(NSString *name) {
 - (void)refreshDynamicWithCompletion:(void (^)(void))completion {
     if (!_hp || !self.connected) { completion(); return; }
     Headphones *hp = _hp.get();
+    BOOL isV2 = _bt->getProtocolVersion() == SonyProtocolVersion::V2;
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         // The headphone's physical button only changes ambient/NC, so that's all we poll (keeps traffic low).
         // requestAmbientState() is protocol-aware (v2 uses 66 17, v1 uses 66 02), so this is safe on both.
         try { hp->requestAmbientState(); } catch (std::exception &exc) {}
+        // Battery drains, earbuds get docked and the case charges them, so re-read it too - but only
+        // every Nth poll, since it costs up to three inquiries on TWS. v2 only: 0x22 is POWER_OFF on v1.
+        if (isV2 && self->_dynamicTick++ % kBatteryPollEveryNTicks == 0) {
+            try { hp->requestBattery(); } catch (std::exception &exc) {}
+        }
         dispatch_async(dispatch_get_main_queue(), ^{ completion(); });
     });
 }
@@ -336,6 +354,9 @@ static BOOL SHCLooksLikeSonyHeadset(NSString *name) {
             ok = NO;
             error = @(exc.what());
         }
+        // The write never landed, so stop it counting as pending - otherwise the ambient read-back stays
+        // suppressed and the UI freezes on a value the headphones never took.
+        if (!ok) hp->discardAmbientChanges();
         dispatch_async(dispatch_get_main_queue(), ^{
             completion(ok, error);
         });
@@ -368,6 +389,18 @@ static BOOL SHCLooksLikeSonyHeadset(NSString *name) {
     dispatch_async(_cmdQueue, ^{
         NSString *error = nil; BOOL ok = YES;
         try { hp->setAdaptiveVolume(enabled); } catch (std::exception &exc) { ok = NO; error = @(exc.what()); }
+        dispatch_async(dispatch_get_main_queue(), ^{ completion(ok, error); });
+    });
+}
+
+- (void)setPrioritizeSoundQuality:(BOOL)prioritize completion:(void (^)(BOOL, NSString * _Nullable))completion {
+    if (!_hp || !self.connected) { completion(NO, @"Not connected."); return; }
+    Headphones *hp = _hp.get();
+    dispatch_async(_cmdQueue, ^{
+        NSString *error = nil; BOOL ok = YES;
+        try {
+            hp->setSoundQualityMode(prioritize ? PRIOR_MODE::SOUND_QUALITY : PRIOR_MODE::STABLE_CONNECTION);
+        } catch (std::exception &exc) { ok = NO; error = @(exc.what()); }
         dispatch_async(dispatch_get_main_queue(), ^{ completion(ok, error); });
     });
 }

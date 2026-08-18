@@ -37,6 +37,9 @@ typedef NS_ENUM(NSInteger, SHCAmbientMode) {
 @property (nonatomic, readonly) NSInteger batteryLeft;    // -1 if n/a
 @property (nonatomic, readonly) NSInteger batteryRight;
 @property (nonatomic, readonly) NSInteger batteryCase;
+@property (nonatomic, readonly) BOOL batteryLeftCharging;
+@property (nonatomic, readonly) BOOL batteryRightCharging;
+@property (nonatomic, readonly) BOOL batteryCaseCharging;
 @property (nonatomic, readonly) NSInteger eqPreset;       // raw preset byte (EQ_PRESET)
 @property (nonatomic, readonly) BOOL supportsEqualizer;   // v2 devices only
 @property (nonatomic, readonly) NSInteger clearBass;      // -10..10
@@ -53,6 +56,8 @@ typedef NS_ENUM(NSInteger, SHCAmbientMode) {
 @property (nonatomic, readonly) BOOL speakToChat;
 @property (nonatomic, readonly) BOOL hasAdaptiveVolume;
 @property (nonatomic, readonly) BOOL adaptiveVolume;
+@property (nonatomic, readonly) BOOL hasSoundQualityMode;
+@property (nonatomic, readonly) BOOL prioritizeSoundQuality; // NO = prioritize stable connection
 
 // Runs the native Bluetooth device picker (modal, main thread) and connects to the chosen device.
 // completion is called on the main thread.
@@ -84,6 +89,10 @@ typedef NS_ENUM(NSInteger, SHCAmbientMode) {
 - (void)setAutoPowerOff:(NSInteger)index completion:(void (^)(BOOL ok, NSString * _Nullable error))completion;
 - (void)setSpeakToChat:(BOOL)enabled completion:(void (^)(BOOL ok, NSString * _Nullable error))completion;
 - (void)setAdaptiveVolume:(BOOL)enabled completion:(void (^)(BOOL ok, NSString * _Nullable error))completion;
+
+// Switches the Bluetooth connection priority. The headphones re-negotiate the audio link, so the
+// connection normally drops a moment after this returns - that is the device working as intended.
+- (void)setPrioritizeSoundQuality:(BOOL)prioritize completion:(void (^)(BOOL ok, NSString * _Nullable error))completion;
 
 // Re-reads the fast-changing state (ambient/NC, level, EQ, DSEE) so changes made with the headphone's
 // own button show up in the app. Called on a timer while connected.
