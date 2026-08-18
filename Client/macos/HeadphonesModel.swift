@@ -283,7 +283,14 @@ final class HeadphonesModel: ObservableObject {
             if !ok {
                 self.eqPreset = self.bridge.eqPreset
                 if let error = error { self.errorMessage = error }
+                return
             }
+            // The bridge re-reads the EQ after the write, so this picks up the band values that belong to
+            // the preset just selected - in particular the custom curve the device restores for Manual,
+            // which is what the sliders below the chips show.
+            self.eqPreset = self.bridge.eqPreset
+            self.clearBass = self.bridge.clearBass
+            self.eqBands = (0..<5).map { self.bridge.equalizerBand(at: $0) }
         }
     }
 

@@ -485,6 +485,9 @@ void CrossPlatformGUI::_drawEqualizer()
 		{
 			this->_uiEqPreset = presets[i].val;
 			int p = presets[i].val;
+			// setEqualizerPreset() re-reads the bands that go with the new preset (the device restores the
+			// stored custom curve for Manual), so pull them into the sliders once the command lands.
+			this->_eqBandsNeedSync = true;
 			this->_sendFeatureCommand([this, p]() { this->_headphones.setEqualizerPreset((EQ_PRESET)p); });
 		}
 		if (sel) ImGui::PopStyleColor();
@@ -605,6 +608,15 @@ void CrossPlatformGUI::_sendPendingASMChanges()
 		try { this->_featureCommandFuture.get(); }
 		catch (const RecoverableException& e) { if (e.shouldDisconnect) this->_bt.disconnect(); this->_mq.addMessage(e.what()); }
 		catch (const std::exception& e) { this->_mq.addMessage(e.what()); }
+
+		if (this->_eqBandsNeedSync)
+		{
+			this->_eqBandsNeedSync = false;
+			this->_uiEqPreset = (int)(unsigned char)this->_headphones.getEqualizerPreset();
+			for (int i = 0; i < 5; ++i)
+				this->_uiEqBands[i] = this->_headphones.getEqualizerBand(i);
+			this->_uiClearBass = this->_headphones.getClearBass();
+		}
 	}
 
 	if (this->_sendCommandFuture.valid() && this->_sendCommandFuture.ready())

@@ -94,6 +94,9 @@ private:
 	int _uiEqPreset = 0;
 	std::array<int, 5> _uiEqBands = { 0, 0, 0, 0, 0 };
 	int _uiClearBass = 0;
+	// Set when a preset write is in flight, so the band sliders take the values the device reports for
+	// that preset once it completes instead of keeping the previous preset's.
+	bool _eqBandsNeedSync = false;
 	bool _uiDsee = false;
 	int _uiAutoPowerOff = 0;
 	bool _uiSpeakToChat = false;

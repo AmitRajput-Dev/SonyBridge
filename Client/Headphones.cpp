@@ -305,8 +305,22 @@ void Headphones::setEqualizerPreset(EQ_PRESET preset)
 		(char)rawPreset,
 		0x00
 	});
-	std::lock_guard guard(this->_propertyMtx);
-	this->_eqPreset = preset;
+	{
+		std::lock_guard guard(this->_propertyMtx);
+		this->_eqPreset = preset;
+	}
+	// The band values that go with the new preset live on the device, not here: selecting MANUAL restores
+	// the custom curve the user last stored on the headphones, and every other preset has its own fixed
+	// curve. Without this read-back the cached bands stay whatever the *previous* preset had, so switching
+	// to Manual showed the wrong slider positions. A failed read-back mustn't fail the write that already
+	// went through - the cached preset above is still correct, only the bands would be stale.
+	try
+	{
+		this->requestEqualizer();
+	}
+	catch (const std::exception&)
+	{
+	}
 }
 
 void Headphones::setEqualizerCustom(int clearBass, const std::vector<int>& bands)
