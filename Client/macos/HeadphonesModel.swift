@@ -49,6 +49,15 @@ final class HeadphonesModel: ObservableObject {
     private var pollTimer: Timer?
     private var dynamicTimer: Timer?
 
+    // Slider-drag coalescing (mirrors the ImGui in-flight gate in CrossPlatformGUI).
+    // While an exchange is in flight, only the latest value is remembered; when the
+    // exchange completes, at most one more send fires with that latest value. All
+    // state is main-thread-confined (bridge completions arrive on the main queue).
+    private var pushInFlight = false
+    private var pendingPush: (mode: SHCAmbientMode, level: Int, focusVoice: Bool)?
+    private var eqInFlight = false
+    private var pendingEq: (bass: Int, bands: [Int])?
+
     func connect() {
         connecting = true
         errorMessage = nil
@@ -151,7 +160,24 @@ final class HeadphonesModel: ObservableObject {
     func applyCustomEq() {
         eqPreset = 0xA0
         errorMessage = nil
-        bridge.setCustomEqualizerBass(clearBass, bands: eqBands.map { NSNumber(value: $0) }) { ok, error in
+        if eqInFlight {
+            pendingEq = (clearBass, eqBands)
+            return
+        }
+        sendCustomEq((clearBass, eqBands))
+    }
+
+    private func sendCustomEq(_ sent: (bass: Int, bands: [Int])) {
+        eqInFlight = true
+        bridge.setCustomEqualizerBass(sent.bass, bands: sent.bands.map { NSNumber(value: $0) }) { ok, error in
+            self.eqInFlight = false
+            if let pending = self.pendingEq {
+                self.pendingEq = nil
+                if pending != sent {
+                    self.sendCustomEq(pending)
+                    return
+                }
+            }
             if !ok, let error = error { self.errorMessage = error }
         }
     }
@@ -167,6 +193,8 @@ final class HeadphonesModel: ObservableObject {
     func disconnect() {
         stopWatchingConnection()
         stopDynamicPolling()
+        pendingPush = nil
+        pendingEq = nil
         bridge.disconnect()
         connected = false
         deviceName = ""
@@ -210,7 +238,24 @@ final class HeadphonesModel: ObservableObject {
 
     private func pushState() {
         errorMessage = nil
-        bridge.applyMode(mode, level: ambientLevel, focusVoice: focusOnVoice) { ok, error in
+        if pushInFlight {
+            pendingPush = (mode, ambientLevel, focusOnVoice)
+            return
+        }
+        sendPush((mode, ambientLevel, focusOnVoice))
+    }
+
+    private func sendPush(_ sent: (mode: SHCAmbientMode, level: Int, focusVoice: Bool)) {
+        pushInFlight = true
+        bridge.applyMode(sent.mode, level: sent.level, focusVoice: sent.focusVoice) { ok, error in
+            self.pushInFlight = false
+            if let pending = self.pendingPush {
+                self.pendingPush = nil
+                if pending != sent {
+                    self.sendPush(pending)
+                    return
+                }
+            }
             if ok {
                 self.syncFromBridge()
             } else if let error = error {
