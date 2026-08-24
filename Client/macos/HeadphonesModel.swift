@@ -120,21 +120,30 @@ final class HeadphonesModel: ObservableObject {
         bridge.setAdaptiveVolume(on) { ok, error in if !ok, let e = error { self.errorMessage = e } }
     }
 
+    // Every @Published setter fires objectWillChange — and a full ContentView body
+    // re-evaluation — even when the value is unchanged. The 2s poll mostly re-reads
+    // cached bridge values, so gate writes to real changes.
+    private func assignIfChanged<T: Equatable>(_ keyPath: ReferenceWritableKeyPath<HeadphonesModel, T>, _ newValue: T) {
+        if self[keyPath: keyPath] != newValue {
+            self[keyPath: keyPath] = newValue
+        }
+    }
+
     // Poll the button-changeable state so the app stays in sync when you use the headphone's own controls.
     private func startDynamicPolling() {
         stopDynamicPolling()
         dynamicTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
             guard let self = self, self.connected else { return }
             self.bridge.refreshDynamic {
-                self.mode = self.bridge.mode
+                self.assignIfChanged(\.mode, self.bridge.mode)
                 let level = self.bridge.ambientLevel
-                if level > 0 { self.ambientLevel = level }
-                self.eqPreset = self.bridge.eqPreset
-                self.supportsEqualizer = self.bridge.supportsEqualizer
-                self.clearBass = self.bridge.clearBass
-                self.supportsDsee = self.bridge.supportsDsee
-                self.dsee = self.bridge.dsee
-                self.eqBands = (0..<5).map { self.bridge.equalizerBand(at: $0) }
+                if level > 0 { self.assignIfChanged(\.ambientLevel, level) }
+                self.assignIfChanged(\.eqPreset, self.bridge.eqPreset)
+                self.assignIfChanged(\.supportsEqualizer, self.bridge.supportsEqualizer)
+                self.assignIfChanged(\.clearBass, self.bridge.clearBass)
+                self.assignIfChanged(\.supportsDsee, self.bridge.supportsDsee)
+                self.assignIfChanged(\.dsee, self.bridge.dsee)
+                self.assignIfChanged(\.eqBands, (0..<5).map { self.bridge.equalizerBand(at: $0) })
             }
         }
     }
@@ -265,18 +274,18 @@ final class HeadphonesModel: ObservableObject {
     }
 
     private func syncFromBridge() {
-        connected = bridge.connected
-        deviceName = bridge.deviceName ?? ""
-        deviceMac = bridge.deviceMac ?? ""
-        protocolVersion = bridge.protocolVersionString ?? ""
-        supportsVpt = bridge.supportsVpt
-        supportsEqualizer = bridge.supportsEqualizer
-        supportsDsee = bridge.supportsDsee
-        maxAmbientLevel = bridge.maxAmbientLevel
-        mode = bridge.mode
+        assignIfChanged(\.connected, bridge.connected)
+        assignIfChanged(\.deviceName, bridge.deviceName ?? "")
+        assignIfChanged(\.deviceMac, bridge.deviceMac ?? "")
+        assignIfChanged(\.protocolVersion, bridge.protocolVersionString ?? "")
+        assignIfChanged(\.supportsVpt, bridge.supportsVpt)
+        assignIfChanged(\.supportsEqualizer, bridge.supportsEqualizer)
+        assignIfChanged(\.supportsDsee, bridge.supportsDsee)
+        assignIfChanged(\.maxAmbientLevel, bridge.maxAmbientLevel)
+        assignIfChanged(\.mode, bridge.mode)
         let level = bridge.ambientLevel
-        if level > 0 { ambientLevel = level }
-        focusOnVoice = bridge.focusOnVoice
-        focusOnVoiceAvailable = bridge.focusOnVoiceAvailable
+        if level > 0 { assignIfChanged(\.ambientLevel, level) }
+        assignIfChanged(\.focusOnVoice, bridge.focusOnVoice)
+        assignIfChanged(\.focusOnVoiceAvailable, bridge.focusOnVoiceAvailable)
     }
 }
