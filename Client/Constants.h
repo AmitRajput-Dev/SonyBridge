@@ -14,7 +14,7 @@ inline unsigned char SERVICE_UUID_IN_BYTES[] = { // this is the SERVICE_UUID but
 	0xb3, 0x2d, 0xe3, 0x16, 0xf5, 0xe0, 0x69, 0xba
 };
 
-// Second-generation Sony protocol (WH-CH720N, WF/WH-1000XM5, newer XM4/WF-C700N units, etc).
+// Second-generation Sony protocol (WH-CH720N, WF/WH-1000XM5, WF-C700N, etc).
 inline constexpr auto SERVICE_UUID_V2 = "956C7B26-D49A-4BA8-B03F-B17D393CB6E2";
 inline unsigned char SERVICE_UUID_V2_IN_BYTES[] = { // this is the SERVICE_UUID_V2 but in bytes
 	0x95, 0x6c, 0x7b, 0x26, 0xd4, 0x9a, 0x4b, 0xa8,
@@ -26,6 +26,37 @@ enum class SonyProtocolVersion : signed char
 	V1 = 0,
 	V2 = 1
 };
+
+// First-generation MDR protocol used by the WH-1000XM4 and earlier models. Several values overlap
+// with v2 but mean something entirely different, so call sites must select a namespace only after
+// the SDP service UUID has established the protocol version.
+namespace V1Command
+{
+	inline constexpr unsigned char INIT_REQUEST = 0x00;
+	inline constexpr unsigned char INIT_REPLY   = 0x01;
+	inline constexpr unsigned char FW_GET       = 0x04;
+	inline constexpr unsigned char FW_RET       = 0x05;
+	inline constexpr unsigned char BATTERY_GET  = 0x10;
+	inline constexpr unsigned char BATTERY_RET  = 0x11;
+	inline constexpr unsigned char CODEC_GET    = 0x18;
+	inline constexpr unsigned char CODEC_RET    = 0x19;
+	inline constexpr unsigned char POWER_OFF    = 0x22;
+	inline constexpr unsigned char EQ_GET       = 0x56;
+	inline constexpr unsigned char EQ_RET       = 0x57;
+	inline constexpr unsigned char EQ_SET       = 0x58;
+	inline constexpr unsigned char AMBIENT_GET  = 0x66;
+	inline constexpr unsigned char AMBIENT_RET  = 0x67;
+	inline constexpr unsigned char AMBIENT_SET  = 0x68;
+	inline constexpr unsigned char DSEE_GET     = 0xe6;
+	inline constexpr unsigned char DSEE_RET     = 0xe7;
+	inline constexpr unsigned char DSEE_SET     = 0xe8;
+	inline constexpr unsigned char BTNMODE_GET  = 0xf6;
+	inline constexpr unsigned char BTNMODE_RET  = 0xf7;
+	inline constexpr unsigned char BTNMODE_SET  = 0xf8;
+	inline constexpr unsigned char SUB_AUTO_POWER_OFF = 0x04;
+	inline constexpr unsigned char SUB_SPEAK_TO_CHAT  = 0x05;
+	inline constexpr unsigned char MANUAL_EQ = 0xff;
+}
 
 // Second-generation (v2) inquiry/response command opcodes (the first payload byte).
 // Byte layouts reverse-engineered by GadgetBridge (SonyProtocolImplV2); verified against WH-CH720N.
@@ -55,6 +86,20 @@ namespace V2Command
 	inline constexpr unsigned char BTNMODE_SET  = 0xf8; // SET f8 <sub> <value...>
 	inline constexpr unsigned char SUB_ADAPTIVE_VOLUME = 0x0a;
 	inline constexpr unsigned char SUB_SPEAK_TO_CHAT   = 0x0c;
+	// Touch-sensor family. On the WH-ULT900N (ULT WEAR) subtype 0xd1 carries the multipoint
+	// ("Connect to 2 devices simultaneously") state; the enable bit is inverted (00=on, 01=off).
+	// Source: GadgetBridge SonyProtocolImplV2 setWideAreaTap/handleTouchSensor + getConnectTwoDevices
+	// (commits 8cbc309346, e8520865f3, 5d7b37d1b7 - hardware-verified against the WH-ULT900N).
+	inline constexpr unsigned char TOUCH_GET    = 0xd6; // GET d6 <sub> -> RET d7 <sub> 00 <00=on/01=off>
+	inline constexpr unsigned char TOUCH_RET    = 0xd7;
+	inline constexpr unsigned char TOUCH_SET    = 0xd8; // SET d8 <sub> 00 <00=on/01=off>
+	inline constexpr unsigned char SUB_MULTIPOINT = 0xd1;
+	// System-control family (reboot=0x16, multipoint apply=0x06). Multipoint SETs are committed with
+	// the fixed frame 98 00 06 01 - identical bytes for both ON and OFF; the touch-sensor frame above
+	// carries the actual state. The matching RET (97 00 06 xx) always reports 01, so it is never used
+	// as a state source.
+	inline constexpr unsigned char SYSCTL_SET   = 0x98;
+	inline constexpr unsigned char SUB_SYSCTL_MULTIPOINT = 0x06;
 }
 
 // v2 equalizer preset ids (byte value sent/received at EQ payload[2]).

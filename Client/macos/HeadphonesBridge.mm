@@ -7,6 +7,7 @@
 #import <IOBluetoothUI/IOBluetoothUI.h>
 #import <IOBluetooth/IOBluetooth.h>
 
+#include <atomic>
 #include <memory>
 #include "MacOSBluetoothConnector.h"
 #include "BluetoothWrapper.h"
@@ -16,18 +17,21 @@
 
 @implementation HeadphonesBridge {
     std::unique_ptr<BluetoothWrapper> _bt;
-    std::unique_ptr<Headphones> _hp;
+    // Queued operations retain the current device state so disconnecting cannot invalidate a raw pointer
+    // while a Bluetooth read or write is still completing.
+    std::shared_ptr<Headphones> _hp;
     NSString *_deviceName;
     NSString *_deviceMac;
-    BOOL _initialized;
-    // All user-initiated commands run on this SERIAL queue so quick successive taps reach the device in
-    // order (a concurrent queue let them race and land out of order).
+    std::atomic_bool _initialized;
+    // All device I/O runs on this serial queue. Bluetooth commands are stateful, and serializing reads with
+    // writes also prevents a slow capability probe from racing a user action or dynamic refresh.
     dispatch_queue_t _cmdQueue;
 }
 
 - (instancetype)init {
     if ((self = [super init])) {
         _bt = std::make_unique<BluetoothWrapper>(std::make_unique<MacOSBluetoothConnector>());
+        _initialized = false;
         _cmdQueue = dispatch_queue_create("com.sonybridge.commands", DISPATCH_QUEUE_SERIAL);
     }
     return self;
@@ -56,8 +60,7 @@
 }
 
 - (NSInteger)maxAmbientLevel {
-    if (self.connected && _bt->getProtocolVersion() == SonyProtocolVersion::V2) return 20;
-    return 19;
+    return 20;
 }
 
 - (SHCAmbientMode)mode {
@@ -96,7 +99,7 @@
 }
 
 - (BOOL)supportsEqualizer {
-    return self.connected && _bt->getProtocolVersion() == SonyProtocolVersion::V2;
+    return _hp && _hp->hasEqualizer();
 }
 
 - (NSInteger)clearBass {
@@ -105,6 +108,10 @@
 
 - (BOOL)dsee {
     return _hp ? _hp->getDsee() : NO;
+}
+
+- (BOOL)supportsDsee {
+    return _hp && _hp->hasDsee();
 }
 
 - (NSInteger)equalizerBandAtIndex:(NSInteger)index {
@@ -121,6 +128,8 @@
 - (BOOL)speakToChat { return _hp && _hp->getSpeakToChat(); }
 - (BOOL)hasAdaptiveVolume { return _hp && _hp->hasAdaptiveVolume(); }
 - (BOOL)adaptiveVolume { return _hp && _hp->getAdaptiveVolume(); }
+- (BOOL)hasMultipoint { return _hp && _hp->hasMultipoint(); }
+- (BOOL)multipoint { return _hp && _hp->getMultipoint(); }
 
 static BOOL SHCLooksLikeSonyHeadset(NSString *name) {
     if (name.length == 0) return NO;
@@ -157,8 +166,16 @@ static BOOL SHCLooksLikeSonyHeadset(NSString *name) {
         return;
     }
 
+    // A device without an address string would hand std::string a null char* below (undefined
+    // behaviour); getConnectedDevices() applies the same guard.
+    NSString *address = [device addressString];
+    if (!address) {
+        completion(NO, @"The selected device has no Bluetooth address.");
+        return;
+    }
+
     try {
-        _bt->connect([[device addressString] UTF8String]);
+        _bt->connect([address UTF8String]);
     } catch (RecoverableException &exc) {
         completion(NO, @(exc.what()));
         return;
@@ -180,7 +197,7 @@ static BOOL SHCLooksLikeSonyHeadset(NSString *name) {
 
     _deviceName = [device nameOrAddress];
     _deviceMac = [device addressString];
-    _hp = std::make_unique<Headphones>(*_bt);
+    _hp = std::make_shared<Headphones>(*_bt);
     completion(YES, nil);
 }
 
@@ -189,36 +206,22 @@ static BOOL SHCLooksLikeSonyHeadset(NSString *name) {
     _hp.reset();
     _deviceName = nil;
     _deviceMac = nil;
-    _initialized = NO;
+    _initialized = false;
 }
 
 - (void)refreshStatusWithCompletion:(void (^)(void))completion {
     if (!_hp || !self.connected) { completion(); return; }
-    Headphones *hp = _hp.get();
-    // CRITICAL: the init/battery/EQ inquiries below use v2 opcodes. Opcode 0x22 is BATTERY_LEVEL_REQUEST
-    // on v2 but POWER_OFF on v1 - sending it to a v1 device (e.g. WH-1000XM4) powers the headphones off.
-    // A v1 device still needs *some* valid handshake traffic right after connect or it drops/powers off on
-    // its own, so read its ambient state (read-only 66 02) instead of sending nothing.
-    if (_bt->getProtocolVersion() != SonyProtocolVersion::V2) {
-        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-            try { hp->requestAmbientState(); } catch (std::exception &exc) {}
-            dispatch_async(dispatch_get_main_queue(), ^{ completion(); });
-        });
-        return;
-    }
-    // Reads run on the global queue (not the serial command queue) so they don't block quick user taps;
-    // per-call the connector mutex still serializes actual I/O.
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        // Fast, always-supported reads first, then update the UI immediately...
-        try {
-            if (!self->_initialized) {
-                hp->initDevice();
-                self->_initialized = YES;
-            }
-            hp->requestBattery();
-            hp->requestEqualizer();
-            hp->requestDsee();
-        } catch (std::exception &exc) {}
+    auto hp = _hp;
+    dispatch_async(_cmdQueue, ^{
+        // Every method chooses its command family from the SDP-confirmed protocol version. This is
+        // essential for v1: 0x22 powers off an XM4 but requests battery state on v2.
+        if (!self->_initialized.load()) {
+            try { hp->initDevice(); self->_initialized = true; } catch (std::exception &exc) {}
+        }
+        try { hp->requestAmbientState(); } catch (std::exception &exc) {}
+        try { hp->requestBattery(); } catch (std::exception &exc) {}
+        try { hp->requestEqualizer(); } catch (std::exception &exc) {}
+        try { hp->requestDsee(); } catch (std::exception &exc) {}
         dispatch_async(dispatch_get_main_queue(), ^{ completion(); });
 
         // ...then the optional-feature probes, which can each take a couple seconds to time out on a
@@ -230,8 +233,8 @@ static BOOL SHCLooksLikeSonyHeadset(NSString *name) {
 
 - (void)refreshDynamicWithCompletion:(void (^)(void))completion {
     if (!_hp || !self.connected) { completion(); return; }
-    Headphones *hp = _hp.get();
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+    auto hp = _hp;
+    dispatch_async(_cmdQueue, ^{
         // The headphone's physical button only changes ambient/NC, so that's all we poll (keeps traffic low).
         // requestAmbientState() is protocol-aware (v2 uses 66 17, v1 uses 66 02), so this is safe on both.
         try { hp->requestAmbientState(); } catch (std::exception &exc) {}
@@ -244,12 +247,11 @@ static BOOL SHCLooksLikeSonyHeadset(NSString *name) {
         completion(NO, @"Not connected.");
         return;
     }
-    // The v2 EQ SET opcode differs from v1; only issue it on confirmed v2 devices.
-    if (_bt->getProtocolVersion() != SonyProtocolVersion::V2) {
+    if (!_hp->hasEqualizer()) {
         completion(NO, @"Equalizer control isn't supported on this device yet.");
         return;
     }
-    Headphones *hp = _hp.get();
+    auto hp = _hp;
     dispatch_async(_cmdQueue, ^{
         NSString *error = nil;
         BOOL ok = YES;
@@ -266,14 +268,14 @@ static BOOL SHCLooksLikeSonyHeadset(NSString *name) {
 }
 
 - (void)setCustomEqualizerBass:(NSInteger)bass bands:(NSArray<NSNumber *> *)bands completion:(void (^)(BOOL, NSString * _Nullable))completion {
-    if (!_hp || !self.connected || _bt->getProtocolVersion() != SonyProtocolVersion::V2) {
+    if (!_hp || !self.connected || !_hp->hasEqualizer()) {
         completion(NO, @"Equalizer control isn't supported on this device yet.");
         return;
     }
     std::vector<int> cbands;
     for (NSNumber *n in bands) cbands.push_back((int)n.integerValue);
     int cbass = (int)bass;
-    Headphones *hp = _hp.get();
+    auto hp = _hp;
     dispatch_async(_cmdQueue, ^{
         NSString *error = nil; BOOL ok = YES;
         try {
@@ -284,11 +286,11 @@ static BOOL SHCLooksLikeSonyHeadset(NSString *name) {
 }
 
 - (void)setDsee:(BOOL)enabled completion:(void (^)(BOOL, NSString * _Nullable))completion {
-    if (!_hp || !self.connected || _bt->getProtocolVersion() != SonyProtocolVersion::V2) {
+    if (!_hp || !self.connected || !_hp->hasDsee()) {
         completion(NO, @"Not supported on this device.");
         return;
     }
-    Headphones *hp = _hp.get();
+    auto hp = _hp;
     dispatch_async(_cmdQueue, ^{
         NSString *error = nil; BOOL ok = YES;
         try {
@@ -307,27 +309,26 @@ static BOOL SHCLooksLikeSonyHeadset(NSString *name) {
         return;
     }
 
-    switch (mode) {
-        case SHCAmbientModeOff:
-            _hp->setAmbientSoundControl(false);
-            break;
-        case SHCAmbientModeNoiseCanceling:
-            _hp->setAmbientSoundControl(true);
-            _hp->setAsmLevel(0);
-            _hp->setFocusOnVoice(false);
-            break;
-        case SHCAmbientModeAmbientSound:
-            _hp->setAmbientSoundControl(true);
-            _hp->setAsmLevel((int)MAX(level, 1));
-            _hp->setFocusOnVoice(focusVoice);
-            break;
-    }
-
-    Headphones *hp = _hp.get();
+    auto hp = _hp;
     dispatch_async(_cmdQueue, ^{
         NSString *error = nil;
         BOOL ok = YES;
         try {
+            switch (mode) {
+                case SHCAmbientModeOff:
+                    hp->setAmbientSoundControl(false);
+                    break;
+                case SHCAmbientModeNoiseCanceling:
+                    hp->setAmbientSoundControl(true);
+                    hp->setAsmLevel(0);
+                    hp->setFocusOnVoice(false);
+                    break;
+                case SHCAmbientModeAmbientSound:
+                    hp->setAmbientSoundControl(true);
+                    hp->setAsmLevel((int)MAX(level, 1));
+                    hp->setFocusOnVoice(focusVoice);
+                    break;
+            }
             if (hp->isChanged()) hp->setChanges();
         } catch (RecoverableException &exc) {
             ok = NO;
@@ -344,7 +345,7 @@ static BOOL SHCLooksLikeSonyHeadset(NSString *name) {
 
 - (void)setAutoPowerOff:(NSInteger)index completion:(void (^)(BOOL, NSString * _Nullable))completion {
     if (!_hp || !self.connected) { completion(NO, @"Not connected."); return; }
-    Headphones *hp = _hp.get();
+    auto hp = _hp;
     dispatch_async(_cmdQueue, ^{
         NSString *error = nil; BOOL ok = YES;
         try { hp->setAutoPowerOff((int)index); } catch (std::exception &exc) { ok = NO; error = @(exc.what()); }
@@ -354,7 +355,7 @@ static BOOL SHCLooksLikeSonyHeadset(NSString *name) {
 
 - (void)setSpeakToChat:(BOOL)enabled completion:(void (^)(BOOL, NSString * _Nullable))completion {
     if (!_hp || !self.connected) { completion(NO, @"Not connected."); return; }
-    Headphones *hp = _hp.get();
+    auto hp = _hp;
     dispatch_async(_cmdQueue, ^{
         NSString *error = nil; BOOL ok = YES;
         try { hp->setSpeakToChat(enabled); } catch (std::exception &exc) { ok = NO; error = @(exc.what()); }
@@ -364,10 +365,20 @@ static BOOL SHCLooksLikeSonyHeadset(NSString *name) {
 
 - (void)setAdaptiveVolume:(BOOL)enabled completion:(void (^)(BOOL, NSString * _Nullable))completion {
     if (!_hp || !self.connected) { completion(NO, @"Not connected."); return; }
-    Headphones *hp = _hp.get();
+    auto hp = _hp;
     dispatch_async(_cmdQueue, ^{
         NSString *error = nil; BOOL ok = YES;
         try { hp->setAdaptiveVolume(enabled); } catch (std::exception &exc) { ok = NO; error = @(exc.what()); }
+        dispatch_async(dispatch_get_main_queue(), ^{ completion(ok, error); });
+    });
+}
+
+- (void)setMultipoint:(BOOL)enabled completion:(void (^)(BOOL, NSString * _Nullable))completion {
+    if (!_hp || !self.connected) { completion(NO, @"Not connected."); return; }
+    auto hp = _hp;
+    dispatch_async(_cmdQueue, ^{
+        NSString *error = nil; BOOL ok = YES;
+        try { hp->setMultipoint(enabled); } catch (std::exception &exc) { ok = NO; error = @(exc.what()); }
         dispatch_async(dispatch_get_main_queue(), ^{ completion(ok, error); });
     });
 }

@@ -77,9 +77,11 @@ struct ContentView: View {
                 }
                 if model.supportsEqualizer {
                     equalizerCard
+                }
+                if model.supportsDsee {
                     dseeCard
                 }
-                if model.hasAdaptiveVolume || model.hasSpeakToChat || model.hasAutoPowerOff {
+                if model.hasAdaptiveVolume || model.hasSpeakToChat || model.hasAutoPowerOff || model.hasMultipoint {
                     settingsCard
                 }
                 if let error = model.errorMessage {
@@ -351,6 +353,18 @@ struct ContentView: View {
             if model.hasSpeakToChat {
                 settingToggle("Speak-to-Chat", "Pause music when you talk",
                               on: model.speakToChat) { model.setSpeakToChat($0) }
+                Toggle(isOn: $model.keepSpeakToChatOff) {
+                    Text("Keep off on connect")
+                        .font(.system(size: 11))
+                        .foregroundColor(Theme.secondary)
+                }
+                .toggleStyle(SwitchToggleStyle(tint: Theme.accent))
+                .controlSize(.small)
+                .padding(.leading, 12)
+            }
+            if model.hasMultipoint {
+                settingToggle("Connect to 2 devices", "Stay paired to two devices at once",
+                              on: model.multipoint) { model.setMultipoint($0) }
             }
             if model.hasAutoPowerOff {
                 HStack {

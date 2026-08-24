@@ -34,12 +34,13 @@ public:
 	void setVptType(int val);
 	int getVptType();
 
-	// Handshake the device expects before it answers inquiry (GET) commands on the v2 protocol.
+	// Handshake the device expects before it answers inquiry (GET) commands.
 	void initDevice();
 
-	// Battery (v2 inquiry). getBatteryLevel() returns -1 until requestBattery() succeeds.
+	// Battery. getBatteryLevel() returns -1 until requestBattery() succeeds.
 	// For TWS earbuds requestBattery() also fills the per-earbud + case levels (hasDualBattery()).
 	void requestBattery();
+	bool hasBattery();
 	int getBatteryLevel();
 	bool isBatteryCharging();
 	bool hasDualBattery();
@@ -47,8 +48,9 @@ public:
 	int getBatteryRight();
 	int getBatteryCase();
 
-	// Equalizer (v2). requestEqualizer() reads current state; setEqualizerPreset() pushes a preset immediately.
+	// Equalizer. Wire subtypes and the custom-preset byte differ between protocol generations.
 	void requestEqualizer();
+	bool hasEqualizer();
 	EQ_PRESET getEqualizerPreset();
 	void setEqualizerPreset(EQ_PRESET preset);
 	// Custom (manual) EQ: 5 band values + clear bass, each in [-10, 10]. Selects the MANUAL preset.
@@ -56,8 +58,9 @@ public:
 	int getClearBass();
 	int getEqualizerBand(int index); // 0..4
 
-	// DSEE / audio upsampling (v2).
+	// DSEE / audio upsampling.
 	void requestDsee();
+	bool hasDsee();
 	bool getDsee();
 	void setDsee(bool enabled);
 
@@ -86,31 +89,43 @@ public:
 	bool getAdaptiveVolume();
 	void setAdaptiveVolume(bool enabled);
 
+	// Multipoint ("Connect to 2 devices simultaneously"). v2 only; the setting is device-persistent,
+	// so the app never enforces a default - the toggle just reads and writes the on-device state.
+	bool hasMultipoint();
+	bool getMultipoint();
+	void setMultipoint(bool enabled);
+
 	bool isChanged();
 	void setChanges();
 private:
-	Property<bool> _ambientSoundControl = { 0 };
-	Property<bool> _focusOnVoice = { 0 };
-	Property<int> _asmLevel = { 0 };
+	Property<bool> _ambientSoundControl = { false, false };
+	Property<bool> _focusOnVoice = { false, false };
+	Property<int> _asmLevel = { 0, 0 };
+	NC_ASM_SETTING_TYPE _ncAsmSettingType = NC_ASM_SETTING_TYPE::DUAL_SINGLE_OFF;
+	ASM_SETTING_TYPE _asmSettingType = ASM_SETTING_TYPE::LEVEL_ADJUSTMENT;
 	Property<SOUND_POSITION_PRESET> _surroundPosition = { SOUND_POSITION_PRESET::OUT_OF_RANGE, SOUND_POSITION_PRESET::OFF };
-	Property<int> _vptType = { 0 };
+	Property<int> _vptType = { 0, 0 };
 
 	int _batteryLevel = -1;
+	bool _hasBattery = false;
 	bool _batteryCharging = false;
 	bool _hasDualBattery = false;
 	int _batteryLeft = -1;
 	int _batteryRight = -1;
 	int _batteryCase = -1;
 	EQ_PRESET _eqPreset = EQ_PRESET::OFF;
+	bool _hasEqualizer = false;
 	std::vector<int> _eqBands = { 0, 0, 0, 0, 0 };
 	int _eqClearBass = 0;
 	bool _dsee = false;
+	bool _hasDsee = false;
 
 	bool _hasAutoPowerOff = false; int _autoPowerOff = 0;
 	bool _hasFirmware = false; std::string _firmware;
 	bool _hasCodec = false; std::string _codec;
 	bool _hasSpeakToChat = false; bool _speakToChat = false;
 	bool _hasAdaptiveVolume = false; bool _adaptiveVolume = false;
+	bool _hasMultipoint = false; bool _multipoint = false;
 
 	std::mutex _propertyMtx;
 
