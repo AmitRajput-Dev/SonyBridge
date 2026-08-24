@@ -1,0 +1,4 @@
+# libFuzzer's RSS-monitor std::thread is heap-allocated and never joined at
+# exit (fuzzer::StartRssThread, FuzzerDriver.cpp). It is runtime-internal and
+# reports as a 56-byte leak; keep detect_leaks=1 for the code under test.
+leak:fuzzer::StartRssThread
