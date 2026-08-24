@@ -34,13 +34,7 @@ MacOSBluetoothConnector::~MacOSBluetoothConnector()
 
 -(void)rfcommChannelData:(IOBluetoothRFCOMMChannel *)rfcommChannel data:(void *)dataPointer length:(size_t)dataLength
 {
-    std::lock_guard<std::mutex> g(delegateCPP->receiveDataMutex);
-    
-    unsigned char* buffer = (unsigned char*)dataPointer;
-    std::vector<unsigned char> vectorBuffer(buffer, buffer+dataLength);
-    
-    delegateCPP->receivedBytes.push_back(vectorBuffer);
-    delegateCPP->receiveDataConditionVariable.notify_one();
+    delegateCPP->enqueueReceivedData((const unsigned char*)dataPointer, dataLength);
 }
 
 
@@ -181,6 +175,27 @@ void MacOSBluetoothConnector::connect(const std::string& addrStr){
     }
 }
 
+void MacOSBluetoothConnector::enqueueReceivedData(const unsigned char* data, size_t length)
+{
+    // A zero-length RFCOMM frame carries no message bytes; queuing it would make recv() return 0,
+    // which BluetoothWrapper treats as a closed connection.
+    if (length == 0) return;
+
+    std::lock_guard<std::mutex> g(receiveDataMutex);
+    receivedBytes.emplace_back(data, data + length);
+    receivedBytesTotal += length;
+
+    // Nothing drains the queue between command exchanges, so a flooding device would otherwise grow
+    // it without bound. Drop the oldest chunks past the cap (never the newest one); the wrapper's
+    // START/END marker scan resynchronizes on whatever survives.
+    while (receivedBytesTotal > RECEIVE_BUFFER_CAP && receivedBytes.size() > 1) {
+        receivedBytesTotal -= receivedBytes.front().size();
+        receivedBytes.pop_front();
+    }
+
+    receiveDataConditionVariable.notify_one();
+}
+
 int MacOSBluetoothConnector::recv(char* buf, size_t length)
 {
     // wait for newly received data, but time out so an unanswered inquiry (probing an unsupported
@@ -198,16 +213,18 @@ int MacOSBluetoothConnector::recv(char* buf, size_t length)
     // fill the buf with the new data
     std::vector<unsigned char> receivedVector = receivedBytes.front();
     receivedBytes.pop_front();
-    
+    receivedBytesTotal -= receivedVector.size();
+
     size_t lengthCopied = std::min(length, receivedVector.size());
 
     // copy the first amount of bytes
     std::memcpy(buf, receivedVector.data(), lengthCopied);
-    
+
     // too much data, save it for next time
     if (receivedVector.size() > length){
         receivedVector.erase(receivedVector.begin(), receivedVector.begin() + lengthCopied);
         receivedBytes.push_front(receivedVector);
+        receivedBytesTotal += receivedVector.size();
     }
 
 #ifdef SHC_DEBUG_PROTOCOL
@@ -259,6 +276,7 @@ void MacOSBluetoothConnector::disconnect() noexcept
 
     std::lock_guard<std::mutex> g(receiveDataMutex);
     receivedBytes.clear();
+    receivedBytesTotal = 0;
 }
 void MacOSBluetoothConnector::closeConnection() {
     // Only one close path owns the channel pointer. A remote-close callback clears it first.

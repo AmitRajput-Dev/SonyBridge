@@ -164,8 +164,16 @@ static BOOL SHCLooksLikeSonyHeadset(NSString *name) {
         return;
     }
 
+    // A device without an address string would hand std::string a null char* below (undefined
+    // behaviour); getConnectedDevices() applies the same guard.
+    NSString *address = [device addressString];
+    if (!address) {
+        completion(NO, @"The selected device has no Bluetooth address.");
+        return;
+    }
+
     try {
-        _bt->connect([[device addressString] UTF8String]);
+        _bt->connect([address UTF8String]);
     } catch (RecoverableException &exc) {
         completion(NO, @(exc.what()));
         return;
