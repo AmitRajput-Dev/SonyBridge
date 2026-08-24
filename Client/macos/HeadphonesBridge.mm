@@ -128,6 +128,8 @@
 - (BOOL)speakToChat { return _hp && _hp->getSpeakToChat(); }
 - (BOOL)hasAdaptiveVolume { return _hp && _hp->hasAdaptiveVolume(); }
 - (BOOL)adaptiveVolume { return _hp && _hp->getAdaptiveVolume(); }
+- (BOOL)hasMultipoint { return _hp && _hp->hasMultipoint(); }
+- (BOOL)multipoint { return _hp && _hp->getMultipoint(); }
 
 static BOOL SHCLooksLikeSonyHeadset(NSString *name) {
     if (name.length == 0) return NO;
@@ -367,6 +369,16 @@ static BOOL SHCLooksLikeSonyHeadset(NSString *name) {
     dispatch_async(_cmdQueue, ^{
         NSString *error = nil; BOOL ok = YES;
         try { hp->setAdaptiveVolume(enabled); } catch (std::exception &exc) { ok = NO; error = @(exc.what()); }
+        dispatch_async(dispatch_get_main_queue(), ^{ completion(ok, error); });
+    });
+}
+
+- (void)setMultipoint:(BOOL)enabled completion:(void (^)(BOOL, NSString * _Nullable))completion {
+    if (!_hp || !self.connected) { completion(NO, @"Not connected."); return; }
+    auto hp = _hp;
+    dispatch_async(_cmdQueue, ^{
+        NSString *error = nil; BOOL ok = YES;
+        try { hp->setMultipoint(enabled); } catch (std::exception &exc) { ok = NO; error = @(exc.what()); }
         dispatch_async(dispatch_get_main_queue(), ^{ completion(ok, error); });
     });
 }

@@ -89,6 +89,12 @@ public:
 	bool getAdaptiveVolume();
 	void setAdaptiveVolume(bool enabled);
 
+	// Multipoint ("Connect to 2 devices simultaneously"). v2 only; the setting is device-persistent,
+	// so the app never enforces a default - the toggle just reads and writes the on-device state.
+	bool hasMultipoint();
+	bool getMultipoint();
+	void setMultipoint(bool enabled);
+
 	bool isChanged();
 	void setChanges();
 private:
@@ -119,6 +125,7 @@ private:
 	bool _hasCodec = false; std::string _codec;
 	bool _hasSpeakToChat = false; bool _speakToChat = false;
 	bool _hasAdaptiveVolume = false; bool _adaptiveVolume = false;
+	bool _hasMultipoint = false; bool _multipoint = false;
 
 	std::mutex _propertyMtx;
 

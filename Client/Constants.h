@@ -86,6 +86,20 @@ namespace V2Command
 	inline constexpr unsigned char BTNMODE_SET  = 0xf8; // SET f8 <sub> <value...>
 	inline constexpr unsigned char SUB_ADAPTIVE_VOLUME = 0x0a;
 	inline constexpr unsigned char SUB_SPEAK_TO_CHAT   = 0x0c;
+	// Touch-sensor family. On the WH-ULT900N (ULT WEAR) subtype 0xd1 carries the multipoint
+	// ("Connect to 2 devices simultaneously") state; the enable bit is inverted (00=on, 01=off).
+	// Source: GadgetBridge SonyProtocolImplV2 setWideAreaTap/handleTouchSensor + getConnectTwoDevices
+	// (commits 8cbc309346, e8520865f3, 5d7b37d1b7 - hardware-verified against the WH-ULT900N).
+	inline constexpr unsigned char TOUCH_GET    = 0xd6; // GET d6 <sub> -> RET d7 <sub> 00 <00=on/01=off>
+	inline constexpr unsigned char TOUCH_RET    = 0xd7;
+	inline constexpr unsigned char TOUCH_SET    = 0xd8; // SET d8 <sub> 00 <00=on/01=off>
+	inline constexpr unsigned char SUB_MULTIPOINT = 0xd1;
+	// System-control family (reboot=0x16, multipoint apply=0x06). Multipoint SETs are committed with
+	// the fixed frame 98 00 06 01 - identical bytes for both ON and OFF; the touch-sensor frame above
+	// carries the actual state. The matching RET (97 00 06 xx) always reports 01, so it is never used
+	// as a state source.
+	inline constexpr unsigned char SYSCTL_SET   = 0x98;
+	inline constexpr unsigned char SUB_SYSCTL_MULTIPOINT = 0x06;
 }
 
 // v2 equalizer preset ids (byte value sent/received at EQ payload[2]).

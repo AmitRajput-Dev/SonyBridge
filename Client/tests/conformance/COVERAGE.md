@@ -10,5 +10,6 @@ The target contract is the Sony MDR v1 community specification at the revisions 
 | EQ preset and persistent custom EQ | 3 | 0 | 3 | 3 | 0 | 100% |
 | DSEE and Speak-to-Chat mutations | 2 | 0 | 2 | 2 | 0 | 100% |
 | Malformed-frame rejection | 5 | 0 | 5 | 5 | 0 | 100% |
+| v2 multipoint (WH-ULT900N) GET/RET/SET/apply framing | 6 | 0 | 6 | 6 | 0 | 100% |
 
 Hardware behavior is deliberately excluded from this file's score. It has a separate live-device verification gate because the public specification is reverse-engineered and Sony firmware can differ.

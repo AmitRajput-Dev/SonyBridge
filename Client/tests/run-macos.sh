@@ -24,6 +24,7 @@ clang++ -std=c++20 -Wall -Wextra -Werror -I"$client_dir" \
     -o "$conformance_binary"
 
 "$conformance_binary" "$client_dir/tests/conformance/fixtures/xm4_v1_frames.golden"
+"$conformance_binary" "$client_dir/tests/conformance/fixtures/ult900n_v2_multipoint.golden"
 
 clang++ -std=c++20 -Wall -Wextra -Werror -I"$client_dir" \
     "$client_dir/tests/MetamorphicProtocolTests.cpp" \

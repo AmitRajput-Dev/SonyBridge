@@ -431,6 +431,16 @@ void Headphones::probeCapabilities()
 		auto r = this->_conn.sendCommandAndReadResponse({ (char)V2Command::BTNMODE_GET, (char)V2Command::SUB_SPEAK_TO_CHAT }, V2Command::BTNMODE_RET, V2Command::SUB_SPEAK_TO_CHAT);
 		if (r.size() >= 3) { std::lock_guard g(this->_propertyMtx); this->_speakToChat = (r[2] == 0); this->_hasSpeakToChat = true; }
 	} catch (...) {}
+
+	// Multipoint state rides the touch-sensor 0xd1 subtype (GET d6 d1 -> RET d7 d1 00 <00=on/01=off>);
+	// the system-control RET (97 00 06) always reports 01 and cannot be used as the state source.
+	// Proven on the WH-ULT900N by GadgetBridge (SonyProtocolImplV2 getConnectTwoDevices/handleTouchSensor,
+	// commits 8cbc309346..5d7b37d1b7). Other v2 models may alias 0xd1 to a real touch gesture instead,
+	// so exposure stays probe-gated and the label is only shown when the device answers this GET.
+	try {
+		auto r = this->_conn.sendCommandAndReadResponse({ (char)V2Command::TOUCH_GET, (char)V2Command::SUB_MULTIPOINT }, V2Command::TOUCH_RET, V2Command::SUB_MULTIPOINT);
+		if (r.size() >= 4) { std::lock_guard g(this->_propertyMtx); this->_multipoint = (r[3] == 0); this->_hasMultipoint = true; }
+	} catch (...) {}
 }
 
 bool Headphones::hasAutoPowerOff() { std::lock_guard guard(this->_propertyMtx); return this->_hasAutoPowerOff; }
@@ -484,6 +494,22 @@ void Headphones::setAdaptiveVolume(bool enabled)
 	this->_conn.sendCommand({ (char)V2Command::BTNMODE_SET, (char)V2Command::SUB_ADAPTIVE_VOLUME, (char)(enabled ? 0x00 : 0x01) });
 	std::lock_guard guard(this->_propertyMtx);
 	this->_adaptiveVolume = enabled;
+}
+
+bool Headphones::hasMultipoint() { std::lock_guard guard(this->_propertyMtx); return this->_hasMultipoint; }
+bool Headphones::getMultipoint() { std::lock_guard guard(this->_propertyMtx); return this->_multipoint; }
+void Headphones::setMultipoint(bool enabled)
+{
+	if (this->_conn.getProtocolVersion() != SonyProtocolVersion::V2 || !this->hasMultipoint())
+		throw std::logic_error("Multipoint capability has not been confirmed");
+	// GadgetBridge's proven order (SonyHeadphonesProtocol PREF_SONY_CONNECT_TWO_DEVICES case): the
+	// state frame goes first (d8 d1 00 <00=on/01=off>, enable bit inverted), then the fixed apply
+	// commit 98 00 06 01 - identical bytes for both directions. sendCommand waits for the ACK, so
+	// two sequential sends reproduce GadgetBridge's frame/ack interleaving.
+	this->_conn.sendCommand({ (char)V2Command::TOUCH_SET, (char)V2Command::SUB_MULTIPOINT, 0x00, (char)(enabled ? 0x00 : 0x01) });
+	this->_conn.sendCommand({ (char)V2Command::SYSCTL_SET, 0x00, (char)V2Command::SUB_SYSCTL_MULTIPOINT, 0x01 });
+	std::lock_guard guard(this->_propertyMtx);
+	this->_multipoint = enabled;
 }
 
 bool Headphones::isChanged()

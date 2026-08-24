@@ -54,6 +54,8 @@ typedef NS_ENUM(NSInteger, SHCAmbientMode) {
 @property (nonatomic, readonly) BOOL speakToChat;
 @property (nonatomic, readonly) BOOL hasAdaptiveVolume;
 @property (nonatomic, readonly) BOOL adaptiveVolume;
+@property (nonatomic, readonly) BOOL hasMultipoint;   // v2 "Connect to 2 devices simultaneously"
+@property (nonatomic, readonly) BOOL multipoint;
 
 // Runs the native Bluetooth device picker (modal, main thread) and connects to the chosen device.
 // completion is called on the main thread.
@@ -85,6 +87,7 @@ typedef NS_ENUM(NSInteger, SHCAmbientMode) {
 - (void)setAutoPowerOff:(NSInteger)index completion:(void (^)(BOOL ok, NSString * _Nullable error))completion;
 - (void)setSpeakToChat:(BOOL)enabled completion:(void (^)(BOOL ok, NSString * _Nullable error))completion;
 - (void)setAdaptiveVolume:(BOOL)enabled completion:(void (^)(BOOL ok, NSString * _Nullable error))completion;
+- (void)setMultipoint:(BOOL)enabled completion:(void (^)(BOOL ok, NSString * _Nullable error))completion;
 
 // Re-reads the fast-changing state (ambient/NC, level, EQ, DSEE) so changes made with the headphone's
 // own button show up in the app. Called on a timer while connected.

@@ -48,6 +48,10 @@ final class HeadphonesModel: ObservableObject {
     }
     @Published var hasAdaptiveVolume = false
     @Published var adaptiveVolume = false
+    // Multipoint ("Connect to 2 devices"). Device-persistent - no app-enforced default; the
+    // toggle just mirrors the on-device state read by the capability probe.
+    @Published var hasMultipoint = false
+    @Published var multipoint = false
     @Published var deviceMac = ""
     @Published var protocolVersion = ""
 
@@ -111,6 +115,8 @@ final class HeadphonesModel: ObservableObject {
             self.speakToChat = self.bridge.speakToChat
             self.hasAdaptiveVolume = self.bridge.hasAdaptiveVolume
             self.adaptiveVolume = self.bridge.adaptiveVolume
+            self.hasMultipoint = self.bridge.hasMultipoint
+            self.multipoint = self.bridge.multipoint
             // Speak-to-Chat capability is only confirmed by the probeCapabilities pass
             // (the second completion), so this stays armed until then and fires at most
             // once per connect. The device stays untouched unless it reports S2C on.
@@ -139,6 +145,12 @@ final class HeadphonesModel: ObservableObject {
         adaptiveVolume = on
         errorMessage = nil
         bridge.setAdaptiveVolume(on) { ok, error in if !ok, let e = error { self.errorMessage = e } }
+    }
+
+    func setMultipoint(_ on: Bool) {
+        multipoint = on
+        errorMessage = nil
+        bridge.setMultipoint(on) { ok, error in if !ok, let e = error { self.errorMessage = e } }
     }
 
     // Every @Published setter fires objectWillChange — and a full ContentView body
