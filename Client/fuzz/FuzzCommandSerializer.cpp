@@ -7,6 +7,8 @@
 
 namespace
 {
+	using CommandSerializer::Message;
+
 	[[noreturn]] void failInvariant()
 	{
 		std::abort();
@@ -76,7 +78,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
 		{
 			auto packaged = CommandSerializer::packageDataForBt(payload, dataType, sequence);
 			Buffer body(packaged.begin() + 1, packaged.end() - 1);
-			Message expected{ dataType, static_cast<char>(sequence), payload };
+			Message expected{ dataType, sequence, payload };
 			requireEqual(expected, CommandSerializer::unpackBtMessage(body));
 		}
 		catch (const std::exception&)
