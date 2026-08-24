@@ -4,6 +4,7 @@ set -eu
 client_dir=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 test_binary="${TMPDIR:-/tmp}/sonybridge-xm4-protocol-tests"
 conformance_binary="${TMPDIR:-/tmp}/sonybridge-protocol-conformance-tests"
+metamorphic_binary="${TMPDIR:-/tmp}/sonybridge-metamorphic-protocol-tests"
 
 clang++ -std=c++20 -pthread -I"$client_dir" \
     "$client_dir/tests/HeadphonesProtocolTests.cpp" \
@@ -22,3 +23,11 @@ clang++ -std=c++20 -Wall -Wextra -Werror -I"$client_dir" \
     -o "$conformance_binary"
 
 "$conformance_binary" "$client_dir/tests/conformance/fixtures/xm4_v1_frames.golden"
+
+clang++ -std=c++20 -Wall -Wextra -Werror -I"$client_dir" \
+    "$client_dir/tests/MetamorphicProtocolTests.cpp" \
+    "$client_dir/ByteMagic.cpp" \
+    "$client_dir/CommandSerializer.cpp" \
+    -o "$metamorphic_binary"
+
+"$metamorphic_binary"
