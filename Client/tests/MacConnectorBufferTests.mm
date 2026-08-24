@@ -4,10 +4,13 @@
 
 #include "MacOSBluetoothConnector.h"
 
+#include <chrono>
 #include <cstring>
+#include <future>
 #include <iostream>
 #include <numeric>
 #include <stdexcept>
+#include <thread>
 #include <vector>
 
 namespace
@@ -86,6 +89,40 @@ int main()
 		for (int i = 0; i < 200; i++) connector.enqueueReceivedData(chunk.data(), chunk.size());
 		require(bufferedTotal(connector) <= MacOSBluetoothConnector::RECEIVE_BUFFER_CAP,
 			"receive buffer exceeded the cap after split reads");
+	}
+
+	// The connector thread parks in an untimed wait on disconnectionConditionVariable until
+	// running goes false (connectToMac). There is no timed re-poll anymore, so every
+	// running=false setter must store under disconnectionMutex before notifying — a notify
+	// landing between the waiter's predicate check and its block would otherwise be lost
+	// forever. Drive both setters against the exact wait connectToMac performs; iterating
+	// samples the race window at different waiter/setter interleavings.
+	{
+		for (int i = 0; i < 200; i++)
+		{
+			MacOSBluetoothConnector connector;
+			connector.running = true;
+
+			std::promise<void> wokePromise;
+			std::future<void> woke = wokePromise.get_future();
+			std::thread waiter([&] {
+				std::unique_lock<std::mutex> lk(connector.disconnectionMutex);
+				connector.disconnectionConditionVariable.wait(lk, [&] { return !connector.running; });
+				wokePromise.set_value();
+			});
+
+			if (i % 2 == 0)
+				connector.disconnect();
+			else
+				connector.handleChannelClosed();
+
+			if (woke.wait_for(std::chrono::seconds(2)) != std::future_status::ready)
+			{
+				waiter.detach();
+				throw std::runtime_error("disconnect wakeup lost: waiter still parked after 2s");
+			}
+			waiter.join();
+		}
 	}
 
 	std::cout << "macOS connector receive-buffer tests passed\n";

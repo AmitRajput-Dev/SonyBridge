@@ -24,8 +24,9 @@ public:
     virtual void closeConnection();
     virtual SonyProtocolVersion getProtocolVersion() noexcept;
 
-    // Called by the Objective-C RFCOMM delegate when the peer closes the channel. This callback runs
-    // on the connector thread, so it must only signal shutdown; joining that same thread would abort.
+    // Called by the Objective-C RFCOMM delegate when the peer closes the channel. Delegate callbacks
+    // are delivered on the main thread's run loop (the connector thread never pumps one), so this
+    // must only signal shutdown; disconnect()'s close-and-join runs on whichever thread invokes it.
     void handleChannelClosed() noexcept;
 
     // Called by the Objective-C RFCOMM delegate for every received data frame. Drops zero-length

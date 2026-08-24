@@ -130,15 +130,15 @@ void MacOSBluetoothConnector::connectToMac(MacOSBluetoothConnector* macOSBluetoo
     // tell the other tread that we are done connecting
     connectPromise.set_value();
 
-    // keep thread running, until we are disconnected
+    // Park until disconnect. Every delegate callback (data and channel-closed) is delivered on
+    // the main thread's run loop — this thread's run loop has no sources, so there is nothing
+    // to pump here. This frame's `channel` reference keeps the RFCOMM channel alive for the
+    // whole connection; the wait returns exactly once, when a running=false setter notifies.
+    // Setters must store running=false while holding disconnectionMutex (see disconnect()),
+    // or a notify landing between this predicate check and the block would be lost forever.
     std::unique_lock<std::mutex> lk(macOSBluetoothConnector->disconnectionMutex);
-    while (macOSBluetoothConnector->running) {
-        [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:.1]];
-
-        macOSBluetoothConnector->disconnectionConditionVariable.wait_for(
-            lk, std::chrono::milliseconds(1000),
-            [&]() { return !macOSBluetoothConnector->running; });
-    }
+    macOSBluetoothConnector->disconnectionConditionVariable.wait(
+        lk, [&]() { return !macOSBluetoothConnector->running; });
 
     lk.unlock();
 }
@@ -167,7 +167,12 @@ void MacOSBluetoothConnector::connect(const std::string& addrStr){
     try {
         connectFuture.get();
     } catch (...) {
-        running = false;
+        // running=false must be stored under disconnectionMutex: connectToMac's untimed wait
+        // would otherwise miss a notify racing its predicate check and never wake.
+        {
+            std::lock_guard<std::mutex> g(disconnectionMutex);
+            running = false;
+        }
         disconnectionConditionVariable.notify_all();
         receiveDataConditionVariable.notify_all();
         if (uthread.joinable()) uthread.join();
@@ -259,7 +264,12 @@ std::vector<BluetoothDevice> MacOSBluetoothConnector::getConnectedDevices()
 
 void MacOSBluetoothConnector::disconnect() noexcept
 {
-    running = false;
+    // running=false must be stored under disconnectionMutex: connectToMac's untimed wait
+    // would otherwise miss a notify racing its predicate check and never wake.
+    {
+        std::lock_guard<std::mutex> g(disconnectionMutex);
+        running = false;
+    }
     disconnectionConditionVariable.notify_all();
     receiveDataConditionVariable.notify_all();
     closeConnection();
@@ -290,7 +300,12 @@ void MacOSBluetoothConnector::closeConnection() {
 void MacOSBluetoothConnector::handleChannelClosed() noexcept
 {
     rfcommchannel.store(nullptr);
-    running = false;
+    // running=false must be stored under disconnectionMutex: connectToMac's untimed wait
+    // would otherwise miss a notify racing its predicate check and never wake.
+    {
+        std::lock_guard<std::mutex> g(disconnectionMutex);
+        running = false;
+    }
     disconnectionConditionVariable.notify_all();
     receiveDataConditionVariable.notify_all();
 }
