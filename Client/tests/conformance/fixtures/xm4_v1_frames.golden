@@ -1,0 +1,19 @@
+# id|data_type|sequence|payload|complete_frame
+ack_seq1|01|1||3e 01 01 00 00 00 00 02 3c
+escape_triplet|0c|0|3c 3d 3e|3e 0c 00 00 00 00 03 3d 2c 3d 2d 3d 2e c6 3c
+init|0c|0|00 00|3e 0c 00 00 00 00 02 00 00 0e 3c
+firmware_get|0c|0|04 02|3e 0c 00 00 00 00 02 04 02 14 3c
+battery_get|0c|0|10 00|3e 0c 00 00 00 00 02 10 00 1e 3c
+codec_get|0c|0|18 00|3e 0c 00 00 00 00 02 18 00 26 3c
+eq_get|0c|0|56 01|3e 0c 00 00 00 00 02 56 01 65 3c
+eq_preset_bright|0c|0|58 01 10 00|3e 0c 00 00 00 00 04 58 01 10 00 79 3c
+eq_custom|0c|0|58 01 ff 06 0d 08 09 0a 0b 0c|3e 0c 00 00 00 00 0a 58 01 ff 06 0d 08 09 0a 0b 0c b3 3c
+ambient_get|0c|0|66 02|3e 0c 00 00 00 00 02 66 02 76 3c
+ambient_level1|0c|0|68 02 11 02 00 01 00 01|3e 0c 00 00 00 00 08 68 02 11 02 00 01 00 01 93 3c
+ambient_level20|0c|0|68 02 11 02 00 01 00 14|3e 0c 00 00 00 00 08 68 02 11 02 00 01 00 14 a6 3c
+noise_cancel|0c|0|68 02 11 02 02 01 00 00|3e 0c 00 00 00 00 08 68 02 11 02 02 01 00 00 94 3c
+dsee_get|0c|0|e6 02|3e 0c 00 00 00 00 02 e6 02 f6 3c
+dsee_off|0c|0|e8 02 00 00|3e 0c 00 00 00 00 04 e8 02 00 00 fa 3c
+auto_power_get|0c|0|f6 04|3e 0c 00 00 00 00 02 f6 04 08 3c
+speak_get|0c|0|f6 05|3e 0c 00 00 00 00 02 f6 05 09 3c
+speak_off|0c|0|f8 05 01 00|3e 0c 00 00 00 00 04 f8 05 01 00 0e 3c

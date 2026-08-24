@@ -92,8 +92,18 @@ Buffer BluetoothWrapper::sendCommandAndReadResponse(const std::vector<char>& byt
 
 void BluetoothWrapper::_waitForAck()
 {
-	auto msg = this->_readMessage();
-	this->_seqNumber = msg.seqNumber;
+	// Notifications can arrive between a SET and its ACK. _readMessage() acknowledges DATA_MDR frames;
+	// keep consuming until the device's actual ACK arrives so it cannot poison the next command.
+	for (int i = 0; i < 16; i++)
+	{
+		auto msg = this->_readMessage();
+		if (msg.dataType == DATA_TYPE::ACK)
+		{
+			this->_seqNumber = msg.seqNumber;
+			return;
+		}
+	}
+	throw RecoverableException("No acknowledgment received from device", true);
 }
 
 CommandSerializer::Message BluetoothWrapper::_readMessage()
@@ -118,11 +128,17 @@ CommandSerializer::Message BluetoothWrapper::_readMessage()
 		{
 			numRecvd = this->_connector->recv(buf, sizeof(buf));
 		}
+		if (numRecvd <= 0)
+		{
+			throw RecoverableException("Bluetooth connection closed while reading a frame", true);
+		}
 
-		size_t messageStart = 0;
-		size_t messageEnd = numRecvd;
+		// Bytes outside START/END markers are transport noise, not message data. When a frame spans recv()
+		// calls, the next chunk starts inside the frame and therefore begins at byte zero.
+		size_t messageStart = ongoingMessage ? 0 : static_cast<size_t>(numRecvd);
+		size_t messageEnd = static_cast<size_t>(numRecvd);
 
-		for (size_t i = 0; i < numRecvd; i++)
+		for (int i = 0; i < numRecvd; i++)
 		{
 			if (buf[i] == START_MARKER)
 			{
@@ -146,6 +162,10 @@ CommandSerializer::Message BluetoothWrapper::_readMessage()
 		}
 
 		msgBytes.insert(msgBytes.end(), buf + messageStart, buf + messageEnd);
+		if (msgBytes.size() > MAX_BLUETOOTH_MESSAGE_SIZE)
+		{
+			throw RecoverableException("Bluetooth frame exceeds the maximum message size", true);
+		}
 	} while (!messageFinished);
 
 	auto msg = CommandSerializer::unpackBtMessage(msgBytes);
@@ -160,4 +180,3 @@ CommandSerializer::Message BluetoothWrapper::_readMessage()
 
 	return msg;
 }
-

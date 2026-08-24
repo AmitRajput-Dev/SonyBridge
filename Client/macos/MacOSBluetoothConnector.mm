@@ -6,10 +6,9 @@ MacOSBluetoothConnector::MacOSBluetoothConnector()
 }
 MacOSBluetoothConnector::~MacOSBluetoothConnector()
 {
-    // onclose event
-    if (isConnected()){
-        disconnect();
-    }
+    // A failed or remotely closed connection can leave a finished-but-joinable std::thread even when
+    // isConnected() is false. Always perform the idempotent cleanup before the thread is destroyed.
+    disconnect();
 }
 
 @interface AsyncCommDelegate : NSObject <IOBluetoothRFCOMMChannelDelegate> {
@@ -24,7 +23,7 @@ MacOSBluetoothConnector::~MacOSBluetoothConnector()
 #ifdef SHC_DEBUG_PROTOCOL
     fprintf(stderr, "[connect] rfcommChannelClosed\n");
 #endif
-    delegateCPP->disconnect();
+    delegateCPP->handleChannelClosed();
 }
 
 #ifdef SHC_DEBUG_PROTOCOL
@@ -64,7 +63,9 @@ int MacOSBluetoothConnector::send(char* buf, size_t length)
 #ifdef SHC_DEBUG_PROTOCOL
     _debugHexDump("send", buf, length);
 #endif
-    [(__bridge IOBluetoothRFCOMMChannel*)rfcommchannel writeSync:(void*)buf length:length];
+    IOBluetoothRFCOMMChannel *channel = (__bridge IOBluetoothRFCOMMChannel*)rfcommchannel.load();
+    if (channel == nil) throw RecoverableException("Bluetooth connection is closed", false);
+    [channel writeSync:(void*)buf length:length];
     return (int)length;
 }
 
@@ -116,21 +117,21 @@ void MacOSBluetoothConnector::connectToMac(MacOSBluetoothConnector* macOSBluetoo
     AsyncCommDelegate* asyncCommDelegate = [[AsyncCommDelegate alloc] init];
     asyncCommDelegate->delegateCPP = macOSBluetoothConnector;
     // try to open channel
+    macOSBluetoothConnector->running = true;
     IOReturn openResult = [device openRFCOMMChannelAsync:&channel withChannelID:rfcommChannelID delegate:asyncCommDelegate];
 #ifdef SHC_DEBUG_PROTOCOL
     fprintf(stderr, "[connect] openRFCOMMChannelAsync -> 0x%x\n", openResult);
 #endif
     if ( openResult != kIOReturnSuccess ) {
+        macOSBluetoothConnector->running = false;
         RecoverableException exc = RecoverableException("Could not open the rfcomm.", false);
         std::exception_ptr excPtr = std::make_exception_ptr(exc);
         connectPromise.set_exception(excPtr);
         return;
     }
     // store the channel
-    macOSBluetoothConnector->rfcommchannel = (__bridge void*) channel;
+    macOSBluetoothConnector->rfcommchannel.store((__bridge void*) channel);
     macOSBluetoothConnector->protocolVersion = protocolVersion;
-
-    macOSBluetoothConnector->running = true;
 
     // tell the other tread that we are done connecting
     connectPromise.set_value();
@@ -148,6 +149,10 @@ void MacOSBluetoothConnector::connectToMac(MacOSBluetoothConnector* macOSBluetoo
     lk.unlock();
 }
 void MacOSBluetoothConnector::connect(const std::string& addrStr){
+    // Reconnects must reap the previous worker first. Assigning over a joinable std::thread terminates.
+    if (uthread.joinable()) {
+        disconnect();
+    }
     // convert mac address to nsstring
     NSString *addressNSString = [NSString stringWithCString:addrStr.c_str() encoding:[NSString defaultCStringEncoding]];
     // get device based on mac address
@@ -163,8 +168,17 @@ void MacOSBluetoothConnector::connect(const std::string& addrStr){
     rfcommDevice = (__bridge void*) device;
     uthread = std::thread(MacOSBluetoothConnector::connectToMac, this, std::move(connectPromise));
     
-    // wait till the device is connected
-    connectFuture.get();
+    // Wait until SDP lookup and the asynchronous open request have started. If setup fails, reap the
+    // worker before propagating the exception so destruction cannot encounter a joinable thread.
+    try {
+        connectFuture.get();
+    } catch (...) {
+        running = false;
+        disconnectionConditionVariable.notify_all();
+        receiveDataConditionVariable.notify_all();
+        if (uthread.joinable()) uthread.join();
+        throw;
+    }
 }
 
 int MacOSBluetoothConnector::recv(char* buf, size_t length)
@@ -173,8 +187,11 @@ int MacOSBluetoothConnector::recv(char* buf, size_t length)
     // feature) or a dropped link doesn't block the caller forever.
     std::unique_lock<std::mutex> g(receiveDataMutex);
     bool gotData = receiveDataConditionVariable.wait_for(g, std::chrono::milliseconds(2500),
-        [this]{ return !receivedBytes.empty(); });
-    if (!gotData) {
+        [this]{ return !receivedBytes.empty() || !running; });
+    if (!running && receivedBytes.empty()) {
+        throw RecoverableException("Bluetooth connection closed", false);
+    }
+    if (!gotData || receivedBytes.empty()) {
         throw RecoverableException("recv timed out", false);
     }
 
@@ -225,20 +242,39 @@ std::vector<BluetoothDevice> MacOSBluetoothConnector::getConnectedDevices()
 
 void MacOSBluetoothConnector::disconnect() noexcept
 {
-    // close connection
-    closeConnection();
     running = false;
-    // notify the other thread that we are done disconnecting
     disconnectionConditionVariable.notify_all();
-    // wait for the thread to finish
-    uthread.join();
+    receiveDataConditionVariable.notify_all();
+    closeConnection();
+
+    if (uthread.joinable()) {
+        // The delegate only calls handleChannelClosed(), but retain this guard so future callbacks cannot
+        // accidentally reintroduce a self-join termination.
+        if (uthread.get_id() == std::this_thread::get_id()) {
+            uthread.detach();
+        } else {
+            uthread.join();
+        }
+    }
+
+    std::lock_guard<std::mutex> g(receiveDataMutex);
+    receivedBytes.clear();
 }
 void MacOSBluetoothConnector::closeConnection() {
-    // get the channel
-    IOBluetoothRFCOMMChannel *chan = (__bridge IOBluetoothRFCOMMChannel*) rfcommchannel;
+    // Only one close path owns the channel pointer. A remote-close callback clears it first.
+    IOBluetoothRFCOMMChannel *chan = (__bridge IOBluetoothRFCOMMChannel*)rfcommchannel.exchange(nullptr);
+    if (chan == nil) return;
     [chan setDelegate: nil];
     // close the channel
     [chan closeChannel];
+}
+
+void MacOSBluetoothConnector::handleChannelClosed() noexcept
+{
+    rfcommchannel.store(nullptr);
+    running = false;
+    disconnectionConditionVariable.notify_all();
+    receiveDataConditionVariable.notify_all();
 }
 
 
@@ -246,6 +282,6 @@ bool MacOSBluetoothConnector::isConnected() noexcept
 {
     if (!running)
         return false;
-    IOBluetoothRFCOMMChannel *chan = (__bridge IOBluetoothRFCOMMChannel*) rfcommchannel;
-    return chan.isOpen;
+    IOBluetoothRFCOMMChannel *chan = (__bridge IOBluetoothRFCOMMChannel*)rfcommchannel.load();
+    return chan != nil && chan.isOpen;
 }

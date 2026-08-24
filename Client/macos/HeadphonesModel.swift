@@ -30,6 +30,7 @@ final class HeadphonesModel: ObservableObject {
     @Published var supportsEqualizer = false
     @Published var eqBands = [0, 0, 0, 0, 0]
     @Published var clearBass = 0
+    @Published var supportsDsee = false
     @Published var dsee = false
 
     @Published var hasAutoPowerOff = false
@@ -76,7 +77,9 @@ final class HeadphonesModel: ObservableObject {
             self.batteryRight = self.bridge.batteryRight
             self.batteryCase = self.bridge.batteryCase
             self.eqPreset = self.bridge.eqPreset
+            self.supportsEqualizer = self.bridge.supportsEqualizer
             self.clearBass = self.bridge.clearBass
+            self.supportsDsee = self.bridge.supportsDsee
             self.dsee = self.bridge.dsee
             self.eqBands = (0..<5).map { self.bridge.equalizerBand(at: $0) }
             self.hasAutoPowerOff = self.bridge.hasAutoPowerOff
@@ -118,7 +121,9 @@ final class HeadphonesModel: ObservableObject {
                 let level = self.bridge.ambientLevel
                 if level > 0 { self.ambientLevel = level }
                 self.eqPreset = self.bridge.eqPreset
+                self.supportsEqualizer = self.bridge.supportsEqualizer
                 self.clearBass = self.bridge.clearBass
+                self.supportsDsee = self.bridge.supportsDsee
                 self.dsee = self.bridge.dsee
                 self.eqBands = (0..<5).map { self.bridge.equalizerBand(at: $0) }
             }
@@ -131,6 +136,10 @@ final class HeadphonesModel: ObservableObject {
     }
 
     func setEqualizer(_ preset: Int) {
+        if preset == 0xA0 {
+            applyCustomEq()
+            return
+        }
         eqPreset = preset
         errorMessage = nil
         bridge.setEqualizerPreset(preset) { ok, error in
@@ -217,6 +226,7 @@ final class HeadphonesModel: ObservableObject {
         protocolVersion = bridge.protocolVersionString ?? ""
         supportsVpt = bridge.supportsVpt
         supportsEqualizer = bridge.supportsEqualizer
+        supportsDsee = bridge.supportsDsee
         maxAmbientLevel = bridge.maxAmbientLevel
         mode = bridge.mode
         let level = bridge.ambientLevel

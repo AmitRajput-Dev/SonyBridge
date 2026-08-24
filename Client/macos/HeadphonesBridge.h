@@ -23,7 +23,7 @@ typedef NS_ENUM(NSInteger, SHCAmbientMode) {
 
 // Only meaningful while connected.
 @property (nonatomic, readonly) BOOL supportsVpt;        // v1 protocol devices only
-@property (nonatomic, readonly) NSInteger maxAmbientLevel; // 19 (v1) or 20 (v2)
+@property (nonatomic, readonly) NSInteger maxAmbientLevel; // 1...20 on supported devices
 
 // Current on-device state, mirrored from the last successful command.
 @property (nonatomic, readonly) SHCAmbientMode mode;
@@ -38,8 +38,9 @@ typedef NS_ENUM(NSInteger, SHCAmbientMode) {
 @property (nonatomic, readonly) NSInteger batteryRight;
 @property (nonatomic, readonly) NSInteger batteryCase;
 @property (nonatomic, readonly) NSInteger eqPreset;       // raw preset byte (EQ_PRESET)
-@property (nonatomic, readonly) BOOL supportsEqualizer;   // v2 devices only
+@property (nonatomic, readonly) BOOL supportsEqualizer;   // true after a successful read-only probe
 @property (nonatomic, readonly) NSInteger clearBass;      // -10..10
+@property (nonatomic, readonly) BOOL supportsDsee;        // true after a successful read-only probe
 @property (nonatomic, readonly) BOOL dsee;                // DSEE / audio upsampling
 
 // Optional features (present only if the device answered the capability probe on connect).

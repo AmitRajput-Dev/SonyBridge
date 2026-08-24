@@ -24,6 +24,10 @@ public:
     virtual void closeConnection();
     virtual SonyProtocolVersion getProtocolVersion() noexcept;
 
+    // Called by the Objective-C RFCOMM delegate when the peer closes the channel. This callback runs
+    // on the connector thread, so it must only signal shutdown; joining that same thread would abort.
+    void handleChannelClosed() noexcept;
+
     virtual std::vector<BluetoothDevice> getConnectedDevices() noexcept(false);
     std::deque<std::vector<unsigned char>> receivedBytes;
     std::mutex receiveDataMutex;
@@ -36,7 +40,7 @@ public:
     SonyProtocolVersion protocolVersion = SonyProtocolVersion::V1;
 
 private:
-    void *rfcommDevice;
-    void *rfcommchannel;
+    void *rfcommDevice = nullptr;
+    std::atomic<void*> rfcommchannel{nullptr};
     std::thread uthread;
 };

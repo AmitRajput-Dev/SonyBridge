@@ -77,6 +77,8 @@ struct ContentView: View {
                 }
                 if model.supportsEqualizer {
                     equalizerCard
+                }
+                if model.supportsDsee {
                     dseeCard
                 }
                 if model.hasAdaptiveVolume || model.hasSpeakToChat || model.hasAutoPowerOff {
