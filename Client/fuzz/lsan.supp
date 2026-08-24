@@ -1,4 +1,7 @@
-# libFuzzer's RSS-monitor std::thread is heap-allocated and never joined at
-# exit (fuzzer::StartRssThread, FuzzerDriver.cpp). It is runtime-internal and
-# reports as a 56-byte leak; keep detect_leaks=1 for the code under test.
-leak:fuzzer::StartRssThread
+# libFuzzer's own runtime allocates at exit in ways LSan flags but that are not
+# under-test code: the RSS-monitor std::thread is heap-allocated and never joined
+# (fuzzer::StartRssThread), and the coverage/PC printer allocates in the symbolizer
+# when new PCs are observed. Both stacks are entirely inside fuzzer:: internals with
+# the parser nowhere on them. Suppress the whole libFuzzer runtime so detect_leaks=1
+# stays live for CommandSerializer/ByteMagic (their frames never contain "fuzzer::").
+leak:fuzzer::

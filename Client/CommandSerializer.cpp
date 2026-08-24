@@ -53,7 +53,7 @@ namespace CommandSerializer
 			{
 				if (i == src.size() - 1)
 				{
-					throw std::runtime_error("No data left for escaped byte data");
+					throw RecoverableException("No data left for escaped byte data", true);
 				}
 				i = i + 1;
 				switch (src[i])
@@ -71,7 +71,7 @@ namespace CommandSerializer
 					break;
 
 				default:
-					throw std::runtime_error("Unexpected escaped byte");
+					throw RecoverableException("Unexpected escaped byte", true);
 					break;
 				}
 			}
@@ -141,7 +141,7 @@ namespace CommandSerializer
 		//1 (type) + 1 (seq) + 4 (size) + 1 (checksum) = 7 bytes minimum, before any payload.
 		if (unescaped.size() < 7)
 		{
-			throw std::runtime_error("Invalid message: Smaller than the minimum message size");
+			throw RecoverableException("Invalid message: Smaller than the minimum message size", true);
 		}
 
 		unsigned int dataSize =

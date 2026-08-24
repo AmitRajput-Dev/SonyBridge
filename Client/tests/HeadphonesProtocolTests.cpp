@@ -1,5 +1,6 @@
 #include "BluetoothWrapper.h"
 #include "CommandSerializer.h"
+#include "Exceptions.h"
 #include "Headphones.h"
 
 #include <algorithm>
@@ -96,6 +97,19 @@ void require(bool condition, const char* message)
 {
 	if (!condition) throw std::runtime_error(message);
 }
+
+// A malformed inbound frame must surface as a RecoverableException (caught at every call
+// site and shown in the UI) rather than a bare std::runtime_error. If a future call site
+// narrowed its catch to RecoverableException, a plain runtime_error here would reach
+// std::terminate on attacker-controlled input.
+template <typename Fn>
+void expectRecoverable(Fn&& fn, const char* message)
+{
+	try { fn(); }
+	catch (const RecoverableException&) { return; }
+	catch (...) { throw std::runtime_error(message); }
+	throw std::runtime_error(message);
+}
 }
 
 int main()
@@ -174,6 +188,17 @@ int main()
 	require(speakToChat.size() == 4 && (unsigned char)speakToChat[0] == V1Command::BTNMODE_SET &&
 		(unsigned char)speakToChat[1] == V1Command::SUB_SPEAK_TO_CHAT && (unsigned char)speakToChat[3] == 0x00,
 		"Speak-to-Chat did not use the v1 command layout");
+
+	// Malformed inbound frames on the untrusted parser path must throw the recoverable type.
+	// 61 (0x3D) is the escape sentry; a lone one at buffer end and one followed by a
+	// non-escapable byte are the two unescape rejection paths.
+	constexpr char ESCAPE_SENTRY = 61;
+	expectRecoverable([&] { CommandSerializer::unpackBtMessage(Buffer{ ESCAPE_SENTRY }); },
+		"dangling escape byte did not throw RecoverableException");
+	expectRecoverable([&] { CommandSerializer::unpackBtMessage(Buffer{ ESCAPE_SENTRY, 0x00 }); },
+		"unexpected escaped byte did not throw RecoverableException");
+	expectRecoverable([] { CommandSerializer::unpackBtMessage(Buffer{ 0x00, 0x00, 0x00 }); },
+		"under-minimum-size frame did not throw RecoverableException");
 
 	std::cout << "WH-1000XM4 protocol safety tests passed\n";
 	return 0;
