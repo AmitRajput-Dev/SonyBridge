@@ -6,6 +6,8 @@
 import Foundation
 import Combine
 
+private let keepSpeakToChatOffKey = "KeepSpeakToChatOffOnConnect"
+
 final class HeadphonesModel: ObservableObject {
     private let bridge = HeadphonesBridge()
 
@@ -39,6 +41,11 @@ final class HeadphonesModel: ObservableObject {
     @Published var codec = ""
     @Published var hasSpeakToChat = false
     @Published var speakToChat = false
+    // Force Speak-to-Chat off each time we connect (it pauses audio whenever it hears
+    // speech, which is hostile to dictation). Flipping this takes effect next connect.
+    @Published var keepSpeakToChatOff = UserDefaults.standard.object(forKey: keepSpeakToChatOffKey) as? Bool ?? true {
+        didSet { UserDefaults.standard.set(keepSpeakToChatOff, forKey: keepSpeakToChatOffKey) }
+    }
     @Published var hasAdaptiveVolume = false
     @Published var adaptiveVolume = false
     @Published var deviceMac = ""
@@ -58,6 +65,10 @@ final class HeadphonesModel: ObservableObject {
     private var eqInFlight = false
     private var pendingEq: (bass: Int, bands: [Int])?
 
+    // Armed on each successful connect; consumed once Speak-to-Chat capability is
+    // confirmed, so the off-on-connect enforcement fires at most once per connection.
+    private var s2cAutoDisablePending = false
+
     func connect() {
         connecting = true
         errorMessage = nil
@@ -66,6 +77,7 @@ final class HeadphonesModel: ObservableObject {
             self.bridge.scanAndConnect { ok, error in
                 self.connecting = false
                 if ok {
+                    self.s2cAutoDisablePending = true
                     self.syncFromBridge()
                     self.startWatchingConnection()
                     self.refreshStatus()
@@ -99,6 +111,15 @@ final class HeadphonesModel: ObservableObject {
             self.speakToChat = self.bridge.speakToChat
             self.hasAdaptiveVolume = self.bridge.hasAdaptiveVolume
             self.adaptiveVolume = self.bridge.adaptiveVolume
+            // Speak-to-Chat capability is only confirmed by the probeCapabilities pass
+            // (the second completion), so this stays armed until then and fires at most
+            // once per connect. The device stays untouched unless it reports S2C on.
+            if self.s2cAutoDisablePending && self.hasSpeakToChat {
+                self.s2cAutoDisablePending = false
+                if self.keepSpeakToChatOff && self.speakToChat {
+                    self.setSpeakToChat(false)
+                }
+            }
         }
     }
 
@@ -204,6 +225,7 @@ final class HeadphonesModel: ObservableObject {
         stopDynamicPolling()
         pendingPush = nil
         pendingEq = nil
+        s2cAutoDisablePending = false
         bridge.disconnect()
         connected = false
         deviceName = ""
