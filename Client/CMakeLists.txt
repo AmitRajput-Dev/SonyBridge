@@ -84,7 +84,10 @@ if (LINUX)
 endif ()
 
 if (WIN32)
-    ADD_DEFINITIONS(-DUNICODE)
+    target_compile_definitions(SonyHeadphonesClient PRIVATE
+        UNICODE _UNICODE
+        NOMINMAX
+        WIN32_LEAN_AND_MEAN)
 
     target_sources(SonyHeadphonesClient
         PRIVATE windows/WindowsGUI.cpp
@@ -94,8 +97,11 @@ if (WIN32)
         imgui/backends/imgui_impl_win32.cpp
     )
 
+    # Non-MSVC toolchains have no #pragma comment(lib, ...), so name every import library here.
     target_link_libraries(SonyHeadphonesClient
-        PRIVATE d3d11
+        PRIVATE d3d11 dxgi d3dcompiler
+        ws2_32 rpcrt4 bthprops
+        dwmapi          # imgui_impl_win32.cpp
     )
 endif ()
 
