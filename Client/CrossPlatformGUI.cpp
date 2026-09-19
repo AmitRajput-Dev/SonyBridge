@@ -1,5 +1,7 @@
 #include "CrossPlatformGUI.h"
 
+#include "imgui_internal.h"   // ImGui::RegisterUserTexture()
+
 #include <string>
 #include <vector>
 #include <algorithm>
@@ -317,8 +319,12 @@ const CrossPlatformGUI::DeviceTexture& CrossPlatformGUI::_deviceTexture(const st
 		ImTextureData* tex = IM_NEW(ImTextureData)();
 		tex->Create(ImTextureFormat_RGBA32, w, h);
 		memcpy(tex->GetPixels(), pixels, (size_t)w * h * 4);
-		tex->SetStatus(ImTextureStatus_WantCreate);
-		ImGui::GetPlatformIO().Textures.push_back(tex);
+		// ImGui::UpdateTexturesEndFrame() clears and rebuilds PlatformIO.Textures from the font atlases
+		// and the registered user textures on every frame, so pushing into it directly was dropped again
+		// before the renderer backend ever saw the WantCreate request: the hero image stayed blank in
+		// Release builds and tripped the "ImDrawCmd is referring to ImTextureData that wasn't uploaded"
+		// assert in Debug. RegisterUserTexture() is the supported way in (imgui >= 1.92).
+		ImGui::RegisterUserTexture(tex);
 
 		out.ref = tex->GetTexRef();
 		out.w = w;
