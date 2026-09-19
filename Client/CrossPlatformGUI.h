@@ -26,6 +26,9 @@ const auto WINDOW_COLOR = ImVec4(0.09f, 0.09f, 0.11f, 1.00f);
 
 // Physical-button changes (ASM) are polled roughly every two seconds so the app stays in sync.
 constexpr auto DYNAMIC_POLL_FRAMES = FPS * 2;
+// Battery moves slowly and each read costs a round trip, so it rides along with the ambient poll on a
+// much slower schedule instead of getting a request of its own.
+constexpr auto BATTERY_POLL_FRAMES = FPS * 30;
 
 class CrossPlatformGUI
 {
@@ -81,6 +84,7 @@ private:
 	bool _synced = false;
 	bool _probed = false;
 	int _pollCounter = 0;
+	int _batteryPollCounter = 0;
 
 	// UI state, synced from the device once after connect; user edits are pushed back to the headphones.
 	bool _uiAsmOn = false;
