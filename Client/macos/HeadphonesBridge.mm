@@ -124,7 +124,7 @@
 
 static BOOL SHCLooksLikeSonyHeadset(NSString *name) {
     if (name.length == 0) return NO;
-    NSArray<NSString *> *prefixes = @[@"WH-", @"WF-", @"WI-", @"MDR-", @"XB", @"LinkBuds"];
+    NSArray<NSString *> *prefixes = @[@"WH-", @"WF-", @"WI-", @"MDR-", @"XB", @"LinkBuds", @"ULT"];
     for (NSString *p in prefixes) {
         if ([name hasPrefix:p] || [name containsString:p]) return YES;
     }
@@ -139,6 +139,15 @@ static BOOL SHCLooksLikeSonyHeadset(NSString *name) {
         if ([paired isConnected] && SHCLooksLikeSonyHeadset([paired name])) {
             device = paired;
             break;
+        }
+    }
+    // BLE/audio-only headsets (e.g. ULT WEAR) report isConnected == NO; fall back to any paired Sony headset.
+    if (!device) {
+        for (IOBluetoothDevice *paired in [IOBluetoothDevice pairedDevices]) {
+            if (SHCLooksLikeSonyHeadset([paired name])) {
+                device = paired;
+                break;
+            }
         }
     }
 
