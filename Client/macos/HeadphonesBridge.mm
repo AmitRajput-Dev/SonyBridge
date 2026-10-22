@@ -14,6 +14,23 @@
 // RecoverableException comes in transitively via BluetoothWrapper.h -> IBluetoothConnector.h -> Exceptions.h.
 // (Exceptions.h isn't a project file reference, so it can't be #included directly from this directory.)
 
+@interface SHCPairedDevice ()
+@property (nonatomic, copy, readwrite) NSString *name;
+@property (nonatomic, copy, readwrite) NSString *address;
+@property (nonatomic, readwrite) NSInteger slot;
+@property (nonatomic, readwrite) NSInteger classOfDevice;
+@property (nonatomic, readwrite) BOOL playback;
+@property (nonatomic, readwrite) BOOL isThisMac;
+@end
+
+@implementation SHCPairedDevice
+@end
+
+// IOBluetooth formats addresses as "aa-bb-cc-dd-ee-ff"; the headset reports "AA:BB:CC:DD:EE:FF".
+static NSString *SHCNormalizedAddress(NSString *address) {
+    return [[address uppercaseString] stringByReplacingOccurrencesOfString:@"-" withString:@":"];
+}
+
 @implementation HeadphonesBridge {
     std::unique_ptr<BluetoothWrapper> _bt;
     std::unique_ptr<Headphones> _hp;
@@ -23,12 +40,16 @@
     // All user-initiated commands run on this SERIAL queue so quick successive taps reach the device in
     // order (a concurrent queue let them race and land out of order).
     dispatch_queue_t _cmdQueue;
+    // Multipoint reads can take several seconds (unanswered slot probes time out), so they get their own
+    // serial queue instead of holding up user taps on _cmdQueue.
+    dispatch_queue_t _multipointQueue;
 }
 
 - (instancetype)init {
     if ((self = [super init])) {
         _bt = std::make_unique<BluetoothWrapper>(std::make_unique<MacOSBluetoothConnector>());
         _cmdQueue = dispatch_queue_create("com.sonybridge.commands", DISPATCH_QUEUE_SERIAL);
+        _multipointQueue = dispatch_queue_create("com.sonybridge.multipoint", DISPATCH_QUEUE_SERIAL);
     }
     return self;
 }
@@ -121,6 +142,33 @@
 - (BOOL)speakToChat { return _hp && _hp->getSpeakToChat(); }
 - (BOOL)hasAdaptiveVolume { return _hp && _hp->hasAdaptiveVolume(); }
 - (BOOL)adaptiveVolume { return _hp && _hp->getAdaptiveVolume(); }
+
+- (BOOL)hasPairedDevices { return _hp && _hp->hasPairedDevices(); }
+- (BOOL)hasPlaybackPinState { return _hp && _hp->hasPlaybackPinState(); }
+- (BOOL)playbackPinned { return _hp && _hp->isPlaybackPinned(); }
+- (BOOL)hasMultipointSetting { return _hp && _hp->hasMultipointSetting(); }
+- (BOOL)multipointEnabled { return _hp && _hp->getMultipointEnabled(); }
+- (NSString *)multipointDiagnostics { return _hp ? @(_hp->getMultipointDiagnostics().c_str()) : @""; }
+
+- (NSArray<SHCPairedDevice *> *)pairedDevices {
+    if (!_hp) return @[];
+    NSString *hostAddress = SHCNormalizedAddress([[IOBluetoothHostController defaultController] addressAsString] ?: @"");
+    NSMutableArray<SHCPairedDevice *> *result = [NSMutableArray array];
+    for (const auto &device : _hp->getPairedDevices()) {
+        SHCPairedDevice *item = [SHCPairedDevice new];
+        // Names are UTF-8 as far as we know; fall back to Latin-1 so a bad byte can't drop the row.
+        NSString *name = [[NSString alloc] initWithBytes:device.name.data() length:device.name.size() encoding:NSUTF8StringEncoding]
+            ?: [[NSString alloc] initWithBytes:device.name.data() length:device.name.size() encoding:NSISOLatin1StringEncoding];
+        item.name = name ?: @"";
+        item.address = SHCNormalizedAddress(@(device.address.c_str()));
+        item.slot = device.slot;
+        item.classOfDevice = device.classOfDevice;
+        item.playback = device.playback;
+        item.isThisMac = hostAddress.length > 0 && [item.address isEqualToString:hostAddress];
+        [result addObject:item];
+    }
+    return result;
+}
 
 static BOOL SHCLooksLikeSonyHeadset(NSString *name) {
     if (name.length == 0) return NO;
@@ -225,7 +273,96 @@ static BOOL SHCLooksLikeSonyHeadset(NSString *name) {
         // device that doesn't support them. Update the UI again once they've settled.
         try { hp->probeCapabilities(); } catch (std::exception &exc) {}
         dispatch_async(dispatch_get_main_queue(), ^{ completion(); });
+
+        // Multipoint reads need the init reply (table 2 support), so they run after it, serialized with
+        // any manual refresh.
+        dispatch_sync(self->_multipointQueue, ^{
+            try { hp->requestMultipoint(); } catch (std::exception &exc) {}
+        });
+        dispatch_async(dispatch_get_main_queue(), ^{ completion(); });
     });
+}
+
+- (void)refreshMultipointWithCompletion:(void (^)(void))completion {
+    // GETs only, and v2 only: on v1 these opcodes are unverified (0x22-style collisions are possible).
+    if (!_hp || !self.connected || _bt->getProtocolVersion() != SonyProtocolVersion::V2 || !_initialized) {
+        completion();
+        return;
+    }
+    Headphones *hp = _hp.get();
+    dispatch_async(_multipointQueue, ^{
+        try { hp->requestMultipoint(); } catch (std::exception &exc) {}
+        dispatch_async(dispatch_get_main_queue(), ^{ completion(); });
+    });
+}
+
+static NSString *_Nullable SHCSourceSwitchError(int result) {
+    switch (result) {
+        case V2Table2Command::RESULT_SUCCESS: return nil;
+        case V2Table2Command::RESULT_FAIL_CALLING: return @"The headset refused: a call is in progress.";
+        case V2Table2Command::RESULT_FAIL_A2DP_NOT_CONNECTED: return @"The headset refused: that device isn't connected for audio.";
+        case V2Table2Command::RESULT_FAIL_VOICE_ASSISTANT: return @"The headset refused: the voice assistant has priority.";
+        case V2Table2Command::RESULT_NO_CONFIRMATION: return @"The headset didn't confirm the change. Showing the state it reports now.";
+        default: return [NSString stringWithFormat:@"The headset refused the change (result %d).", result];
+    }
+}
+
+- (void)runMultipointWrite:(int (^)(Headphones *hp))write completion:(void (^)(BOOL, NSString * _Nullable))completion {
+    if (!_hp || !self.connected || _bt->getProtocolVersion() != SonyProtocolVersion::V2 || !_initialized) {
+        completion(NO, @"Not connected.");
+        return;
+    }
+    Headphones *hp = _hp.get();
+    dispatch_async(_multipointQueue, ^{
+        NSString *error = nil;
+        try {
+            error = SHCSourceSwitchError(write(hp));
+        } catch (std::exception &exc) {
+            error = @(exc.what());
+        }
+        try { hp->requestMultipoint(); } catch (std::exception &exc) {}
+        dispatch_async(dispatch_get_main_queue(), ^{ completion(error == nil, error); });
+    });
+}
+
+- (void)switchPlaybackToAddress:(NSString *)address fix:(BOOL)fix completion:(void (^)(BOOL, NSString * _Nullable))completion {
+    std::string target = address.UTF8String ?: "";
+    BOOL alreadyPlaying = NO;
+    for (SHCPairedDevice *device in self.pairedDevices) {
+        if ([device.address isEqualToString:address] && device.playback) alreadyPlaying = YES;
+    }
+    BOOL pinned = self.playbackPinned;
+    [self runMultipointWrite:^int(Headphones *hp) {
+        if (!fix) {
+            // The headset keeps "fixed" on across a switch (the fix moves to the new device), so a plain
+            // switch frees it afterwards. A refused switch leaves the fix untouched.
+            int result = hp->switchPlaybackDevice(target);
+            if (result != V2Table2Command::RESULT_SUCCESS || !pinned) return result;
+            return hp->setPlaybackPinned(false);
+        }
+        // A fixed playback device may refuse a switch, so free it first.
+        BOOL unfixed = NO;
+        if (pinned && !alreadyPlaying) {
+            int result = hp->setPlaybackPinned(false);
+            if (result != V2Table2Command::RESULT_SUCCESS) return result;
+            unfixed = YES;
+        }
+        if (!alreadyPlaying) {
+            int result = hp->switchPlaybackDevice(target);
+            if (result != V2Table2Command::RESULT_SUCCESS) {
+                // Don't leave the old device unfixed after a refused switch (e.g. mid-call).
+                if (unfixed) hp->setPlaybackPinned(true);
+                return result;
+            }
+        }
+        return hp->setPlaybackPinned(true);
+    } completion:completion];
+}
+
+- (void)setPlaybackPinned:(BOOL)pinned completion:(void (^)(BOOL, NSString * _Nullable))completion {
+    [self runMultipointWrite:^int(Headphones *hp) {
+        return hp->setPlaybackPinned(pinned);
+    } completion:completion];
 }
 
 - (void)refreshDynamicWithCompletion:(void (^)(void))completion {

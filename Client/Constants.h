@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <vector>
 
 inline constexpr auto MAX_BLUETOOTH_MESSAGE_SIZE = 2048;
@@ -55,6 +56,54 @@ namespace V2Command
 	inline constexpr unsigned char BTNMODE_SET  = 0xf8; // SET f8 <sub> <value...>
 	inline constexpr unsigned char SUB_ADAPTIVE_VOLUME = 0x0a;
 	inline constexpr unsigned char SUB_SPEAK_TO_CHAT   = 0x0c;
+	// INIT_REPLY layout: 01 <type> <protocol version, 4 bytes BE> <table1: 00=yes> <table2: 00=yes>
+	inline constexpr size_t INIT_REPLY_TABLE2_INDEX = 7;
+	// General settings: up to four device-defined boolean/list settings in slots D1..D4. Which slot holds
+	// what is per-model, so the slot is found by name via GS_GET_CAPABILITY. Values: 00=ON, 01=OFF.
+	inline constexpr unsigned char GS_GET_CAPABILITY = 0xd0; // d0 <slot> <display language 01=English>
+	inline constexpr unsigned char GS_RET_CAPABILITY = 0xd1; // d1 <slot> <type> <fmt> <len>name <len>summary
+	inline constexpr unsigned char GS_GET_PARAM      = 0xd6; // d6 <slot>
+	inline constexpr unsigned char GS_RET_PARAM      = 0xd7; // d7 <slot> <type 00=boolean> <value>
+	inline constexpr unsigned char GS_SLOT_FIRST     = 0xd1;
+	inline constexpr unsigned char GS_SLOT_LAST      = 0xd4;
+	inline constexpr unsigned char GS_DISPLAY_LANGUAGE_ENGLISH = 0x01;
+}
+
+// Second command table (frame DATA_TYPE::DATA_MDR_NO2 = 0x0e) on v2 devices: multipoint / paired-device
+// management. Layouts from mos9527/SonyHeadphonesClient (ProtocolV2T2.hpp, generated from Sound Connect)
+// and WF-1000XM5 / WH-1000XM6 captures.
+// NEVER send these with DATA_MDR (0x0c): in table 1, 0x30-0x3f are the firmware-update (UPDT) commands.
+namespace V2Table2Command
+{
+	inline constexpr unsigned char SUPPORT_FUNCTION_GET = 0x06; // 06 00
+	inline constexpr unsigned char SUPPORT_FUNCTION_RET = 0x07; // 07 00 <n> (<function> <priority>) x n
+	inline constexpr unsigned char PERI_GET_PARAM       = 0x36; // 36 <inquired type>
+	inline constexpr unsigned char PERI_RET_PARAM       = 0x37;
+	inline constexpr unsigned char PERI_SET_PARAM       = 0x38; // 38 01 <00=fix playback, 01=free>
+	inline constexpr unsigned char PERI_NTFY_PARAM      = 0x39; // 39 01 <value> <result>
+	inline constexpr unsigned char PERI_SET_EXTENDED_PARAM  = 0x3c; // 3c 01 <target address, 17 ASCII>
+	inline constexpr unsigned char PERI_NTFY_EXTENDED_PARAM = 0x3d; // 3d 01 <result> <target address>
+
+	// Source-switch results (switch / fix writes). NO_CONFIRMATION is ours: no notify within the timeout.
+	inline constexpr int RESULT_SUCCESS = 0x00;
+	inline constexpr int RESULT_FAIL = 0x01;
+	inline constexpr int RESULT_FAIL_CALLING = 0x02;
+	inline constexpr int RESULT_FAIL_A2DP_NOT_CONNECTED = 0x03;
+	inline constexpr int RESULT_FAIL_VOICE_ASSISTANT = 0x04;
+	inline constexpr int RESULT_NO_CONFIRMATION = -1;
+
+	// Inquired types (payload[1] of the PERI_* commands).
+	inline constexpr unsigned char PERI_DEVICES_CLASSIC = 0x00;   // device list without class of device
+	inline constexpr unsigned char PERI_SOURCE_SWITCH   = 0x01;   // 37 01 <1=switching free, 0=playback fixed>
+	inline constexpr unsigned char PERI_DEVICES_WITH_COD = 0x02;  // device list with class of device
+
+	// Function ids in the SUPPORT_FUNCTION_RET list.
+	inline constexpr unsigned char FN_DEVICES_CLASSIC    = 0x30;
+	inline constexpr unsigned char FN_SOURCE_SWITCH      = 0x31;
+	inline constexpr unsigned char FN_DEVICES_WITH_COD   = 0x32;
+	inline constexpr unsigned char FN_DEVICES_WITH_COD_LE = 0x33;
+
+	inline constexpr size_t BT_ADDRESS_LENGTH = 17; // ASCII "XX:XX:XX:XX:XX:XX", no terminator
 }
 
 // v2 equalizer preset ids (byte value sent/received at EQ payload[2]).

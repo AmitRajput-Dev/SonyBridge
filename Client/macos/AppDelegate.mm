@@ -6,6 +6,7 @@
 //
 
 #import "AppDelegate.h"
+#import "SonyHeadphonesClient-Swift.h"
 
 @interface AppDelegate ()
 
@@ -15,6 +16,7 @@
 @implementation AppDelegate
 - (void)applicationDidFinishLaunching:(NSNotification *)aNotification {
     _window = [[[NSApplication sharedApplication] windows] firstObject];
+    [MenuBarController install];
 }
 
 - (BOOL)applicationShouldHandleReopen:(NSApplication *)theApplication hasVisibleWindows:(BOOL)flag

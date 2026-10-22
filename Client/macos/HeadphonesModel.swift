@@ -6,7 +6,22 @@
 import Foundation
 import Combine
 
+struct PairedDeviceInfo: Identifiable, Equatable {
+    let name: String
+    let address: String
+    let slot: Int              // 0 = paired only, 1/2 = connected
+    let classOfDevice: Int     // -1 if not reported
+    let playback: Bool
+    let isThisMac: Bool
+
+    var id: String { address }
+    var connected: Bool { slot != 0 }
+}
+
 final class HeadphonesModel: ObservableObject {
+    // One connection per app: the window and the menu-bar item drive the same model.
+    static let shared = HeadphonesModel()
+
     private let bridge = HeadphonesBridge()
 
     @Published var connected = false
@@ -42,6 +57,16 @@ final class HeadphonesModel: ObservableObject {
     @Published var adaptiveVolume = false
     @Published var deviceMac = ""
     @Published var protocolVersion = ""
+
+    @Published var hasPairedDevices = false
+    @Published var pairedDevices: [PairedDeviceInfo] = []
+    @Published var hasPlaybackPinState = false
+    @Published var playbackPinned = false
+    @Published var hasMultipointSetting = false
+    @Published var multipointEnabled = false
+    @Published var multipointDiagnostics = ""
+    @Published var refreshingMultipoint = false
+    @Published var multipointBusy = false
 
     @Published var errorMessage: String?
 
@@ -87,7 +112,49 @@ final class HeadphonesModel: ObservableObject {
             self.speakToChat = self.bridge.speakToChat
             self.hasAdaptiveVolume = self.bridge.hasAdaptiveVolume
             self.adaptiveVolume = self.bridge.adaptiveVolume
+            self.syncMultipointFromBridge()
         }
+    }
+
+    func refreshMultipoint() {
+        refreshingMultipoint = true
+        bridge.refreshMultipoint {
+            self.refreshingMultipoint = false
+            self.syncMultipointFromBridge()
+        }
+    }
+
+    func switchPlayback(to device: PairedDeviceInfo, fix: Bool) {
+        multipointBusy = true
+        errorMessage = nil
+        bridge.switchPlayback(toAddress: device.address, fix: fix) { ok, error in
+            self.multipointBusy = false
+            if !ok, let error = error { self.errorMessage = error }
+            self.syncMultipointFromBridge()
+        }
+    }
+
+    func setPlaybackPinned(_ pinned: Bool) {
+        multipointBusy = true
+        errorMessage = nil
+        bridge.setPlaybackPinned(pinned) { ok, error in
+            self.multipointBusy = false
+            if !ok, let error = error { self.errorMessage = error }
+            self.syncMultipointFromBridge()
+        }
+    }
+
+    private func syncMultipointFromBridge() {
+        hasPairedDevices = bridge.hasPairedDevices
+        pairedDevices = bridge.pairedDevices.map {
+            PairedDeviceInfo(name: $0.name, address: $0.address, slot: $0.slot,
+                             classOfDevice: $0.classOfDevice, playback: $0.playback, isThisMac: $0.isThisMac)
+        }
+        hasPlaybackPinState = bridge.hasPlaybackPinState
+        playbackPinned = bridge.playbackPinned
+        hasMultipointSetting = bridge.hasMultipointSetting
+        multipointEnabled = bridge.multipointEnabled
+        multipointDiagnostics = bridge.multipointDiagnostics
     }
 
     func setAutoPowerOff(_ index: Int) {
@@ -111,8 +178,15 @@ final class HeadphonesModel: ObservableObject {
     // Poll the button-changeable state so the app stays in sync when you use the headphone's own controls.
     private func startDynamicPolling() {
         stopDynamicPolling()
+        var tick = 0
         dynamicTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
             guard let self = self, self.connected else { return }
+            // Every 5th tick (10 s), also re-read which device has playback, so the menu-bar icon follows
+            // changes made from the phone. Skipped while a multipoint write or refresh is in flight.
+            tick += 1
+            if tick % 5 == 0 && self.hasPairedDevices && !self.multipointBusy && !self.refreshingMultipoint {
+                self.bridge.refreshMultipoint { self.syncMultipointFromBridge() }
+            }
             self.bridge.refreshDynamic {
                 self.mode = self.bridge.mode
                 let level = self.bridge.ambientLevel
@@ -161,6 +235,7 @@ final class HeadphonesModel: ObservableObject {
         bridge.disconnect()
         connected = false
         deviceName = ""
+        syncMultipointFromBridge()
     }
 
     // The headset can drop the RFCOMM link on its own (idle power-save). Poll so the UI reflects reality
