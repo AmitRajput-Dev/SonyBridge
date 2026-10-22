@@ -267,18 +267,17 @@ static BOOL SHCLooksLikeSonyHeadset(NSString *name) {
             hp->requestEqualizer();
             hp->requestDsee();
         } catch (std::exception &exc) {}
+        // The multipoint reads (device list, fixed state) belong with the fast reads so the playback device
+        // shows up with the battery instead of after the probe timeouts. They need the init reply (table 2
+        // support), so they come after it, serialized with any manual refresh.
+        dispatch_sync(self->_multipointQueue, ^{
+            try { hp->requestMultipoint(); } catch (std::exception &exc) {}
+        });
         dispatch_async(dispatch_get_main_queue(), ^{ completion(); });
 
         // ...then the optional-feature probes, which can each take a couple seconds to time out on a
         // device that doesn't support them. Update the UI again once they've settled.
         try { hp->probeCapabilities(); } catch (std::exception &exc) {}
-        dispatch_async(dispatch_get_main_queue(), ^{ completion(); });
-
-        // Multipoint reads need the init reply (table 2 support), so they run after it, serialized with
-        // any manual refresh.
-        dispatch_sync(self->_multipointQueue, ^{
-            try { hp->requestMultipoint(); } catch (std::exception &exc) {}
-        });
         dispatch_async(dispatch_get_main_queue(), ^{ completion(); });
     });
 }

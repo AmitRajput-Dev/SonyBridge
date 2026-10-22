@@ -76,15 +76,15 @@ struct ContentView: View {
                 if model.mode == .ambientSound {
                     ambientLevelCard
                 }
+                if model.multipointLoading || !model.multipointDiagnostics.isEmpty {
+                    devicesCard
+                }
                 if model.supportsEqualizer {
                     equalizerCard
                     dseeCard
                 }
                 if model.hasAdaptiveVolume || model.hasSpeakToChat || model.hasAutoPowerOff {
                     settingsCard
-                }
-                if !model.multipointDiagnostics.isEmpty {
-                    devicesCard
                 }
                 if let error = model.errorMessage {
                     Text(error)
@@ -399,14 +399,30 @@ struct ContentView: View {
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundColor(.white)
                 Spacer()
-                Button(action: model.refreshMultipoint) {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 12, weight: .semibold))
+                if model.multipointLoading || model.refreshingMultipoint || model.multipointBusy {
+                    ProgressView()
+                        .scaleEffect(0.5)
+                        .frame(width: 16, height: 16)
+                } else {
+                    Button(action: model.refreshMultipoint) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(Theme.secondary)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+            }
+            if model.multipointLoading {
+                HStack(spacing: 10) {
+                    ProgressView()
+                        .scaleEffect(0.6)
+                        .frame(width: 18, height: 18)
+                    Text("Reading devices from the headset…")
+                        .font(.system(size: 12))
                         .foregroundColor(Theme.secondary)
                 }
-                .buttonStyle(PlainButtonStyle())
-                .disabled(model.refreshingMultipoint)
-                .opacity(model.refreshingMultipoint ? 0.4 : 1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 6)
             }
             if model.hasMultipointSetting {
                 devicesInfoRow("Connect to 2 devices", model.multipointEnabled ? "On" : "Off")
@@ -443,11 +459,23 @@ struct ContentView: View {
                     devicesSectionLabel("Paired")
                     ForEach(paired) { deviceRow($0) }
                 }
-            } else {
+            } else if !model.multipointLoading {
                 Text("This headset didn't return a device list.")
                     .font(.system(size: 12))
                     .foregroundColor(Theme.secondary)
             }
+            if !model.multipointLoading {
+                devicesFooter
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.card)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private var devicesFooter: some View {
+        VStack(alignment: .leading, spacing: 14) {
             Divider().background(Theme.cardHi)
             HStack {
                 Text(model.multipointBusy ? "Sending…" : "Switching and fixing are experimental")
@@ -462,10 +490,6 @@ struct ContentView: View {
                 .buttonStyle(PlainButtonStyle())
             }
         }
-        .padding(18)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.card)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private func devicesInfoRow(_ label: String, _ value: String) -> some View {

@@ -68,6 +68,12 @@ final class HeadphonesModel: ObservableObject {
     @Published var refreshingMultipoint = false
     @Published var multipointBusy = false
 
+    // True from connect until the first multipoint read has finished. Those reads run after the
+    // capability probes, so on a v2 headset this can take several seconds.
+    var multipointLoading: Bool {
+        connected && protocolVersion == "v2" && multipointDiagnostics.isEmpty
+    }
+
     @Published var errorMessage: String?
 
     private var pollTimer: Timer?
