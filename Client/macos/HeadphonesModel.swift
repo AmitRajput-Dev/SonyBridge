@@ -49,6 +49,7 @@ final class HeadphonesModel: ObservableObject {
     @Published var eqPreset = 0
     @Published var supportsEqualizer = false
     @Published var eqBands = [0, 0, 0, 0, 0]
+    @Published var tenBandEqualizer = false
     @Published var clearBass = 0
     @Published var supportsDsee = false
     @Published var dsee = false
@@ -133,7 +134,8 @@ final class HeadphonesModel: ObservableObject {
             self.clearBass = self.bridge.clearBass
             self.supportsDsee = self.bridge.supportsDsee
             self.dsee = self.bridge.dsee
-            self.eqBands = (0..<5).map { self.bridge.equalizerBand(at: $0) }
+            self.tenBandEqualizer = self.bridge.tenBandEqualizer
+            self.eqBands = self.readEqBands()
             self.hasAutoPowerOff = self.bridge.hasAutoPowerOff
             self.autoPowerOff = self.bridge.autoPowerOff
             self.firmware = self.bridge.firmware ?? ""
@@ -194,6 +196,10 @@ final class HeadphonesModel: ObservableObject {
         hasMultipointSetting = bridge.hasMultipointSetting
         multipointEnabled = bridge.multipointEnabled
         multipointDiagnostics = bridge.multipointDiagnostics
+    }
+
+    private func readEqBands() -> [Int] {
+        (0..<bridge.equalizerBandCount).map { bridge.equalizerBand(at: $0) }
     }
 
     private func syncBatteryFromBridge() {
@@ -290,7 +296,7 @@ final class HeadphonesModel: ObservableObject {
             // which is what the sliders below the chips show.
             self.eqPreset = self.bridge.eqPreset
             self.clearBass = self.bridge.clearBass
-            self.eqBands = (0..<5).map { self.bridge.equalizerBand(at: $0) }
+            self.eqBands = self.readEqBands()
         }
     }
 

@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstring>
 #include <deque>
+#include <functional>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
@@ -93,9 +94,8 @@ private:
 	std::deque<Buffer> incoming;
 };
 
-// v2-generation device that supports multipoint the way GadgetBridge proved it on the WH-ULT900N:
-// only the touch-sensor 0xd1 GET answers with the multipoint state; every other capability probe
-// times out (recv on an empty queue throws), which the probe treats as "unsupported".
+// v2-generation device scripted per test through `reply`: a request it returns an empty buffer for gets
+// only the ACK, so the read times out (recv on an empty queue throws), which callers treat as "unsupported".
 class FakeV2Connector final : public IBluetoothConnector
 {
 public:
@@ -111,11 +111,8 @@ public:
 
 		sentPayloads.push_back(message.payload);
 		queue({}, DATA_TYPE::ACK, 1 - message.seqNumber);
-		// GET d6 d1 -> RET d7 d1 00 <00=on/01=off> (GadgetBridge SonyProtocolImplV2 handleTouchSensor;
-		// the enable bit is inverted). The fake reports multipoint currently ON.
-		if (message.payload.size() >= 2 && (unsigned char)message.payload[0] == V2Command::TOUCH_GET
-			&& (unsigned char)message.payload[1] == V2Command::SUB_MULTIPOINT)
-			queue({ (char)V2Command::TOUCH_RET, (char)V2Command::SUB_MULTIPOINT, 0x00, 0x00 }, DATA_TYPE::DATA_MDR, 0);
+		auto response = reply ? reply(message.payload) : Buffer{};
+		if (!response.empty()) queue(response, DATA_TYPE::DATA_MDR, 0);
 		return static_cast<int>(length);
 	}
 
@@ -136,6 +133,12 @@ public:
 	SonyProtocolVersion getProtocolVersion() noexcept override { return SonyProtocolVersion::V2; }
 
 	std::vector<Buffer> sentPayloads;
+	std::function<Buffer(const Buffer&)> reply;
+
+	bool sent(const Buffer& payload) const
+	{
+		return std::find(sentPayloads.begin(), sentPayloads.end(), payload) != sentPayloads.end();
+	}
 
 private:
 	void queue(const Buffer& payload, DATA_TYPE type, unsigned char sequence)
@@ -146,6 +149,13 @@ private:
 	bool connected = true;
 	std::deque<Buffer> incoming;
 };
+
+Buffer bytes(std::initializer_list<int> values)
+{
+	Buffer out;
+	for (int v : values) out.push_back((char)v);
+	return out;
+}
 
 void require(bool condition, const char* message)
 {
@@ -245,28 +255,43 @@ int main()
 
 	// Multipoint has no proven v1 frames (GadgetBridge SonyProtocolImplV1: "Connect two devices not
 	// implemented for V1"), so the XM4 path must never probe or set it.
-	require(!headphones.hasMultipoint(), "multipoint capability must stay unconfirmed on v1");
+	headphones.requestMultipoint();
+	require(!headphones.hasMultipointSetting(), "multipoint capability must stay unconfirmed on v1");
 	const auto hasMultipointFrame = std::any_of(observed->sentPayloads.begin(), observed->sentPayloads.end(), [](const Buffer& payload) {
-		return !payload.empty() && ((unsigned char)payload[0] == V2Command::TOUCH_GET ||
-			(unsigned char)payload[0] == V2Command::TOUCH_SET ||
+		return !payload.empty() && ((unsigned char)payload[0] == V2Command::GS_GET_CAPABILITY ||
+			(unsigned char)payload[0] == V2Command::GS_GET_PARAM ||
+			(unsigned char)payload[0] == V2Command::GS_SET_PARAM ||
 			(unsigned char)payload[0] == V2Command::SYSCTL_SET);
 	});
-	require(!hasMultipointFrame, "XM4 path emitted a v2 multipoint frame (d6/d8/98)");
+	require(!hasMultipointFrame, "XM4 path emitted a v2 multipoint frame (d0/d6/d8/98)");
 	bool multipointRejected = false;
 	try { headphones.setMultipoint(true); }
-	catch (const std::logic_error&) { multipointRejected = true; }
+	catch (const std::exception&) { multipointRejected = true; }
 	require(multipointRejected, "setMultipoint on v1 must throw instead of sending");
 
 	// --- v2 multipoint ("Connect to 2 devices"), byte layout proven by GadgetBridge on the WH-ULT900N
 	// (SonyProtocolImplV2 commits 8cbc309346, e8520865f3, 5d7b37d1b7) ---
+	// The setting lives in a per-model general-settings slot, found by name; the ULT900N uses D1.
 	auto fakeV2 = std::make_unique<FakeV2Connector>();
 	auto* observedV2 = fakeV2.get();
+	observedV2->reply = [](const Buffer& request) -> Buffer {
+		if (request == bytes({ 0xd0, 0xd1, 0x01 })) {
+			std::string name = "MULTIPOINT_SETTING";
+			Buffer response = bytes({ 0xd1, 0xd1, 0x00, 0x00, (int)name.size() });
+			response.insert(response.end(), name.begin(), name.end());
+			response.push_back(0x00);
+			return response;
+		}
+		if (request == bytes({ 0xd6, 0xd1 })) return bytes({ 0xd7, 0xd1, 0x00, 0x00 }); // 00 = ON (inverted)
+		return {};
+	};
 	BluetoothWrapper bluetoothV2(std::move(fakeV2));
 	Headphones ult900n(bluetoothV2);
 	ult900n.probeCapabilities();
+	ult900n.requestMultipoint();
 
-	require(ult900n.hasMultipoint(), "v2 multipoint probe (d6 d1) was not recorded");
-	require(ult900n.getMultipoint(), "RET d7 d1 00 00 must parse as multipoint ON (enable bit inverted)");
+	require(ult900n.hasMultipointSetting(), "MULTIPOINT_SETTING slot D1 was not found by name");
+	require(ult900n.getMultipointEnabled(), "RET d7 d1 00 00 must parse as multipoint ON (enable bit inverted)");
 	require(!ult900n.hasSpeakToChat() && !ult900n.hasAdaptiveVolume(),
 		"unanswered v2 probes must stay unsupported");
 
@@ -278,7 +303,7 @@ int main()
 		"multipoint OFF state frame must be d8 d1 00 01");
 	require(offCommit == Buffer({ (char)0x98, 0x00, 0x06, 0x01 }),
 		"multipoint apply commit must be the fixed 98 00 06 01");
-	require(!ult900n.getMultipoint(), "multipoint OFF was not mirrored locally");
+	require(!ult900n.getMultipointEnabled(), "multipoint OFF was not mirrored locally");
 
 	ult900n.setMultipoint(true);
 	const auto onState = observedV2->sentPayloads[observedV2->sentPayloads.size() - 2];
@@ -287,7 +312,54 @@ int main()
 		"multipoint ON state frame must be d8 d1 00 00");
 	require(onCommit == Buffer({ (char)0x98, 0x00, 0x06, 0x01 }),
 		"multipoint ON must reuse the fixed apply commit 98 00 06 01");
-	require(ult900n.getMultipoint(), "multipoint ON was not mirrored locally");
+	require(ult900n.getMultipointEnabled(), "multipoint ON was not mirrored locally");
+
+	// --- WH-1000XM6 (issue #11): noise control reads via 0x19, the equalizer is the ten-band 0x04 layout.
+	// Frames captured on fw 3.1.5 by marconvcm/sony-device-center (#44, #74). ---
+	auto fakeXm6 = std::make_unique<FakeV2Connector>();
+	auto* observedXm6 = fakeXm6.get();
+	observedXm6->reply = [](const Buffer& request) -> Buffer {
+		if (request == bytes({ 0x66, 0x17 })) return bytes({ 0x67, 0x17, 0x00, 0x00, 0x00, 0x00, 0x00 });
+		if (request == bytes({ 0x66, 0x19 })) return bytes({ 0x67, 0x19, 0x01, 0x01, 0x01, 0x00, 0x0a, 0x00, 0x00 });
+		if (request == bytes({ 0x56, 0x04 })) return bytes({ 0x57, 0x04, 0xa0, 0x0a, 6, 6, 6, 6, 6, 6, 6, 6, 6, 12 });
+		return {};
+	};
+	BluetoothWrapper bluetoothXm6(std::move(fakeXm6));
+	Headphones xm6(bluetoothXm6);
+	xm6.setDeviceName("WH-1000XM6");
+
+	xm6.requestAmbientState();
+	require(observedXm6->sent(bytes({ 0x66, 0x19 })) && !observedXm6->sent(bytes({ 0x66, 0x17 })),
+		"XM6 noise control must be read via 66 19");
+	require(xm6.getAmbientSoundControl() && xm6.getAsmLevel() == 10, "XM6 67 19 reply (Ambient, level 10) was not parsed");
+
+	xm6.requestEqualizer();
+	require(xm6.hasEqualizer() && xm6.isTenBandEqualizer(), "XM6 ten-band equalizer was not recognised");
+	require(xm6.getEqualizerBandCount() == 10 && xm6.getEqualizerBand(0) == 6 && xm6.getEqualizerBand(9) == 12,
+		"XM6 raw ten-band values were not decoded");
+	require(xm6.getEqualizerPreset() == EQ_PRESET::MANUAL, "XM6 custom preset byte was not decoded");
+
+	xm6.setEqualizerCustom(5, { 0, 1, 2, 3, 4, 5, 6, 7, 8, 13 });
+	require(observedXm6->sentPayloads.back() == bytes({ 0x58, 0x04, 0xa0, 0x0a, 0, 1, 2, 3, 4, 5, 6, 7, 8, 12 }),
+		"XM6 custom EQ must be 58 04 a0 0a <10 raw bands clamped to 0..12>, no clear bass");
+	xm6.setEqualizerPreset(EQ_PRESET::OFF);
+	require(observedXm6->sent(bytes({ 0x58, 0x04, 0x00, 0x00 })), "XM6 preset must use inquired type 04");
+
+	// Any other v2 headset that answered 66 17 with zeros must not be read as "Off" either.
+	auto fakeZeros = std::make_unique<FakeV2Connector>();
+	fakeZeros->reply = [](const Buffer& request) -> Buffer {
+		if (request == bytes({ 0x66, 0x17 })) return bytes({ 0x67, 0x17, 0x00, 0x00, 0x00, 0x00, 0x00 });
+		return {};
+	};
+	BluetoothWrapper bluetoothZeros(std::move(fakeZeros));
+	Headphones zeros(bluetoothZeros);
+	zeros.setDeviceName("WH-1000XM5");
+	zeros.setAmbientSoundControl(true);
+	zeros.setAsmLevel(7);
+	zeros.setFocusOnVoice(false);
+	zeros.setChanges();
+	zeros.requestAmbientState();
+	require(zeros.getAmbientSoundControl() && zeros.getAsmLevel() == 7, "a zeroed 67 17 reply overwrote the state");
 
 	// Malformed inbound frames on the untrusted parser path must throw the recoverable type.
 	// 61 (0x3D) is the escape sentry; a lone one at buffer end and one followed by a
@@ -300,6 +372,6 @@ int main()
 	expectRecoverable([] { CommandSerializer::unpackBtMessage(Buffer{ 0x00, 0x00, 0x00 }); },
 		"under-minimum-size frame did not throw RecoverableException");
 
-	std::cout << "WH-1000XM4 protocol safety tests passed\n";
+	std::cout << "XM4 / multipoint / XM6 protocol tests passed\n";
 	return 0;
 }

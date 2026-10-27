@@ -271,6 +271,10 @@ struct ContentView: View {
         ("Manual", 0xA0)
     ]
     private let eqBandLabels = ["400", "1k", "2.5k", "6.3k", "16k"]
+    // WH-1000XM6: only Off and Custom have confirmed preset codes on the ten-band layout; its other preset
+    // bytes (0x20, 0x30-0x33, 0xa1-0xa2) are unnamed, and the 5-band codes above don't apply to it.
+    private let tenBandEqPresets: [(String, Int)] = [("Off", 0x00), ("Custom", 0xA0)]
+    private let tenBandEqLabels = ["31", "63", "125", "250", "500", "1k", "2k", "4k", "8k", "16k"]
 
     private var equalizerCard: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -278,22 +282,25 @@ struct ContentView: View {
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundColor(.white)
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-                ForEach(eqPresets, id: \.1) { preset in
+                ForEach(model.tenBandEqualizer ? tenBandEqPresets : eqPresets, id: \.1) { preset in
                     eqChip(preset.0, preset.1)
                 }
             }
             if model.eqPreset == 0xA0 {
                 Divider().background(Theme.cardHi)
-                ForEach(0..<5, id: \.self) { i in
-                    eqBandRow(eqBandLabels[i], value: Binding(
+                let labels = model.tenBandEqualizer ? tenBandEqLabels : eqBandLabels
+                ForEach(0..<min(model.eqBands.count, labels.count), id: \.self) { i in
+                    eqBandRow(labels[i], value: Binding(
                         get: { Double(model.eqBands[i]) },
                         set: { model.eqBands[i] = Int($0.rounded()); model.applyCustomEq() }
-                    ), display: model.eqBands[i])
+                    ), display: model.eqBands[i], raw: model.tenBandEqualizer)
                 }
-                eqBandRow("Bass", value: Binding(
-                    get: { Double(model.clearBass) },
-                    set: { model.clearBass = Int($0.rounded()); model.applyCustomEq() }
-                ), display: model.clearBass, accent: true)
+                if !model.tenBandEqualizer {
+                    eqBandRow("Bass", value: Binding(
+                        get: { Double(model.clearBass) },
+                        set: { model.clearBass = Int($0.rounded()); model.applyCustomEq() }
+                    ), display: model.clearBass, accent: true)
+                }
             }
         }
         .padding(18)
@@ -302,14 +309,15 @@ struct ContentView: View {
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
-    private func eqBandRow(_ label: String, value: Binding<Double>, display: Int, accent: Bool = false) -> some View {
+    // raw: the ten-band layout's 0...12 device steps (no dB mapping is known yet), shown unsigned.
+    private func eqBandRow(_ label: String, value: Binding<Double>, display: Int, accent: Bool = false, raw: Bool = false) -> some View {
         HStack(spacing: 10) {
             Text(label)
                 .font(.system(size: 11, weight: .medium))
                 .foregroundColor(accent ? Theme.accent : Theme.secondary)
                 .frame(width: 34, alignment: .leading)
-            Slider(value: value, in: -10...10, step: 1).accentColor(Theme.accent)
-            Text("\(display > 0 ? "+" : "")\(display)")
+            Slider(value: value, in: raw ? 0...12 : -10...10, step: 1).accentColor(Theme.accent)
+            Text(raw ? "\(display)" : "\(display > 0 ? "+" : "")\(display)")
                 .font(.system(size: 11, weight: .semibold, design: .monospaced))
                 .foregroundColor(.white)
                 .frame(width: 26, alignment: .trailing)

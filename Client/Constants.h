@@ -108,6 +108,11 @@ namespace V2Command
 	inline constexpr unsigned char BTNMODE_SET  = 0xf8; // SET f8 <sub> <value...>
 	inline constexpr unsigned char SUB_ADAPTIVE_VOLUME = 0x0a;
 	inline constexpr unsigned char SUB_SPEAK_TO_CHAT   = 0x0c;
+	// Noise-control inquired types: 66/67/68 <type>. The WH-1000XM6 reads back via 0x19 (0x17 returns zeros).
+	inline constexpr unsigned char NCASM_TYPE     = 0x17;
+	inline constexpr unsigned char NCASM_TYPE_XM6 = 0x19;
+	// Ten-band equalizer inquired type (WH-1000XM6): 56/57/58 04, 10 raw bands 0..12, no clear bass.
+	inline constexpr unsigned char EQ_TEN_BAND    = 0x04;
 	// INIT_REPLY layout: 01 <type> <protocol version, 4 bytes BE> <table1: 00=yes> <table2: 00=yes>
 	inline constexpr size_t INIT_REPLY_TABLE2_INDEX = 7;
 	// General settings: up to four device-defined boolean/list settings in slots D1..D4. Which slot holds

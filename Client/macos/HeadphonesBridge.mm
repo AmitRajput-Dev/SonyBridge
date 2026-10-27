@@ -140,6 +140,14 @@ static NSString *SHCNormalizedAddress(NSString *address) {
     return _hp && _hp->hasDsee();
 }
 
+- (NSInteger)equalizerBandCount {
+    return _hp ? _hp->getEqualizerBandCount() : 5;
+}
+
+- (BOOL)tenBandEqualizer {
+    return _hp && _hp->isTenBandEqualizer();
+}
+
 - (NSInteger)equalizerBandAtIndex:(NSInteger)index {
     return _hp ? _hp->getEqualizerBand((int)index) : 0;
 }

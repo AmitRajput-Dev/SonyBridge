@@ -72,10 +72,13 @@ public:
 	bool hasEqualizer();
 	EQ_PRESET getEqualizerPreset();
 	void setEqualizerPreset(EQ_PRESET preset);
-	// Custom (manual) EQ: 5 band values + clear bass, each in [-10, 10]. Selects the MANUAL preset.
+	// Custom (manual) EQ. Selects the MANUAL preset. Standard layout: 5 bands + clear bass, each in [-10, 10].
+	// Ten-band layout (WH-1000XM6): 10 raw device steps in [0, 12], no clear bass (ignored).
 	void setEqualizerCustom(int clearBass, const std::vector<int>& bands);
 	int getClearBass();
-	int getEqualizerBand(int index); // 0..4
+	int getEqualizerBand(int index);
+	int getEqualizerBandCount();
+	bool isTenBandEqualizer();
 
 	// DSEE / audio upsampling.
 	void requestDsee();
@@ -159,6 +162,9 @@ private:
 	std::string _deviceName;
 
 	bool _looksLikeEarbuds() const;
+	// The WH-1000XM6 speaks a different layout for two v2 commands: noise-control state is read via inquired
+	// type 0x19 (0x17 answers all zeros), and the equalizer uses inquired type 0x04 with 10 raw bands.
+	bool _isWh1000Xm6() const;
 	// Both return false if the device didn't answer that battery sub-type.
 	bool _requestDualBattery(unsigned char subType);
 	bool _requestSingleBattery(unsigned char subType, int& levelOut, bool& chargingOut);

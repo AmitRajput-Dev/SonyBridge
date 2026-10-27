@@ -53,6 +53,8 @@ typedef NS_ENUM(NSInteger, SHCAmbientMode) {
 @property (nonatomic, readonly) NSInteger eqPreset;       // raw preset byte (EQ_PRESET)
 @property (nonatomic, readonly) BOOL supportsEqualizer;   // true after a successful read-only probe
 @property (nonatomic, readonly) NSInteger clearBass;      // -10..10
+@property (nonatomic, readonly) NSInteger equalizerBandCount; // 5, or 10 on the ten-band layout
+@property (nonatomic, readonly) BOOL tenBandEqualizer;   // WH-1000XM6: raw 0..12 bands, no clear bass
 @property (nonatomic, readonly) BOOL supportsDsee;        // true after a successful read-only probe
 @property (nonatomic, readonly) BOOL dsee;                // DSEE / audio upsampling
 

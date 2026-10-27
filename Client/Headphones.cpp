@@ -114,6 +114,13 @@ bool Headphones::_looksLikeEarbuds() const
 	return name.find("wf-") != std::string::npos || name.find("linkbuds") != std::string::npos;
 }
 
+bool Headphones::_isWh1000Xm6() const
+{
+	std::string name;
+	for (char c : this->_deviceName) name.push_back((char)std::tolower((unsigned char)c));
+	return name.find("wh-1000xm6") != std::string::npos || name.find("wh1000xm6") != std::string::npos;
+}
+
 // Reads the per-earbud (and case) levels. Returns false if the device didn't answer this sub-type or
 // answered with nothing usable, so the caller can fall back to the other layout.
 bool Headphones::_requestDualBattery(unsigned char subType)
@@ -258,6 +265,24 @@ bool Headphones::isBatteryCaseCharging() { std::lock_guard guard(this->_property
 void Headphones::requestEqualizer()
 {
 	auto isV1 = this->_conn.getProtocolVersion() == SonyProtocolVersion::V1;
+	if (!isV1 && this->_isWh1000Xm6())
+	{
+		// GET 56 04 -> RET 57 04 <preset> <count=0a> <b1..b10>, raw device steps 0..12 with no bias and no
+		// clear-bass slot. Layout from a Sound Connect btsnoop capture, verified on a WH-1000XM6 (fw 3.1.5)
+		// by sony-device-center (marconvcm/sony-device-center#44). The legacy 56 00 frame is ACKed but ignored.
+		auto resp = this->_conn.sendCommandAndReadResponse(
+			{ (char)V2Command::EQ_GET, (char)V2Command::EQ_TEN_BAND }, V2Command::EQ_RET, V2Command::EQ_TEN_BAND);
+		if (resp.size() < 4) return;
+		size_t count = (unsigned char)resp[3];
+		if (resp.size() < 4 + count) return;
+		std::lock_guard guard(this->_propertyMtx);
+		this->_eqPreset = static_cast<EQ_PRESET>((unsigned char)resp[2]);
+		this->_hasEqualizer = true;
+		this->_eqClearBass = 0;
+		this->_eqBands.assign(resp.begin() + 4, resp.begin() + 4 + count);
+		for (auto& band : this->_eqBands) band = (unsigned char)band;
+		return;
+	}
 	auto subtype = isV1 ? 0x01 : 0x00;
 	// v1 uses subtype 01; v2 uses subtype 00. Both return the same six-band value layout.
 	auto resp = this->_conn.sendCommandAndReadResponse(
@@ -298,10 +323,10 @@ void Headphones::setEqualizerPreset(EQ_PRESET preset)
 	auto isV1 = this->_conn.getProtocolVersion() == SonyProtocolVersion::V1;
 	auto rawPreset = (unsigned char)preset;
 	if (isV1 && preset == EQ_PRESET::MANUAL) rawPreset = V1Command::MANUAL_EQ;
-	// SET preset: v1 58 01 <preset> 00; v2 58 00 <preset> 00.
+	// SET preset: v1 58 01 <preset> 00; v2 58 00 <preset> 00; ten-band v2 58 04 <preset> 00.
 	this->_conn.sendCommand({
 		(char)(isV1 ? V1Command::EQ_SET : V2Command::EQ_SET),
-		(char)(isV1 ? 0x01 : 0x00),
+		(char)(isV1 ? 0x01 : this->_isWh1000Xm6() ? V2Command::EQ_TEN_BAND : 0x00),
 		(char)rawPreset,
 		0x00
 	});
@@ -327,6 +352,21 @@ void Headphones::setEqualizerCustom(int clearBass, const std::vector<int>& bands
 {
 	if (!this->hasEqualizer()) throw std::logic_error("Equalizer capability has not been confirmed");
 	auto isV1 = this->_conn.getProtocolVersion() == SonyProtocolVersion::V1;
+	if (!isV1 && this->_isWh1000Xm6())
+	{
+		// SET 58 04 a0 <count> <b1..bN>, raw 0..12, no clear-bass slot.
+		std::vector<int> raw(bands.begin(), bands.end());
+		for (auto& band : raw) band = std::clamp(band, 0, 12);
+		Buffer cmd = { (char)V2Command::EQ_SET, (char)V2Command::EQ_TEN_BAND,
+			(char)static_cast<unsigned char>(EQ_PRESET::MANUAL), (char)raw.size() };
+		for (int band : raw) cmd.push_back((char)band);
+		this->_conn.sendCommand(cmd);
+
+		std::lock_guard guard(this->_propertyMtx);
+		this->_eqPreset = EQ_PRESET::MANUAL;
+		this->_eqBands = raw;
+		return;
+	}
 	// v1 selects custom EQ with 0xff/subtype 01; v2 uses 0xa0/subtype 00.
 	auto clamp = [](int v) { return (char)(unsigned char)(std::max(-10, std::min(10, v)) + 10); };
 	Buffer cmd = {
@@ -361,6 +401,18 @@ int Headphones::getEqualizerBand(int index)
 {
 	std::lock_guard guard(this->_propertyMtx);
 	return (index >= 0 && index < (int)this->_eqBands.size()) ? this->_eqBands[index] : 0;
+}
+
+int Headphones::getEqualizerBandCount()
+{
+	std::lock_guard guard(this->_propertyMtx);
+	return (int)this->_eqBands.size();
+}
+
+bool Headphones::isTenBandEqualizer()
+{
+	std::lock_guard guard(this->_propertyMtx);
+	return this->_conn.getProtocolVersion() == SonyProtocolVersion::V2 && this->_isWh1000Xm6();
 }
 
 void Headphones::requestDsee()
@@ -414,8 +466,13 @@ void Headphones::requestAmbientState()
 		// GET: 66 17  ->  RET: 67 17 01 <effect> <settingType 0=NC/1=Ambient> <voice> <level>
 		// Match the sub-type too: 0x67 also carries unsolicited notifications with a different layout,
 		// and accepting one of those parsed <effect>/<level> out of unrelated bytes.
-		auto resp = this->_conn.sendCommandAndReadResponse({ 0x66, 0x17 }, 0x67, 0x17);
-		if (resp.size() >= 7)
+		// The WH-1000XM6 answers 66 17 with all zeros in every mode - parsing that as "off" is what snapped its
+		// UI back to Off (issue #11). It reports the same first seven bytes (plus two trailing ones) under
+		// inquired type 0x19, verified on fw 3.1.5 (marconvcm/sony-device-center#74).
+		unsigned char inquired = this->_isWh1000Xm6() ? V2Command::NCASM_TYPE_XM6 : V2Command::NCASM_TYPE;
+		auto resp = this->_conn.sendCommandAndReadResponse({ 0x66, (char)inquired }, 0x67, inquired);
+		// Byte [2] is always 01 in a real reply; anything else (like the XM6's zeroed 0x17 answer) is not state.
+		if (resp.size() >= 7 && resp[2] == 0x01)
 		{
 			bool on = resp[3] != 0;
 			bool ambient = resp[4] != 0;
