@@ -72,12 +72,12 @@ on macOS, and a matching modern UI on Windows/Linux.
 <td><b>macOS</b></td>
 <td>
 
-`brew tap AmitRajput-Dev/tap && brew install --cask sonybridge`
+`brew install --cask amitrajput-dev/tap/sonybridge`
 
 or [**Download .app**](https://github.com/AmitRajput-Dev/SonyBridge/releases/latest)
 
 </td>
-<td>macOS 11+ · Apple Silicon &amp; Intel</td>
+<td>macOS 12+ · Apple Silicon &amp; Intel</td>
 </tr>
 <tr>
 <td><b>Windows</b></td>
