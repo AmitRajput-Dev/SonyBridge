@@ -7,22 +7,16 @@ import SwiftUI
 import AppKit
 import Combine
 
-private enum Theme {
-    static let bg = Color(red: 0.07, green: 0.07, blue: 0.086)
-    static let card = Color(red: 0.13, green: 0.13, blue: 0.16)
-    static let cardHi = Color(red: 0.20, green: 0.20, blue: 0.24)
-    static let accent = Color(red: 0.62, green: 0.62, blue: 0.96)
-    static let secondary = Color(white: 0.62)
-}
-
-@available(macOS 11.0, *)
 struct ContentView: View {
     @StateObject private var model = HeadphonesModel.shared
     @State private var showAbout = false
+    @AppStorage("appTheme") private var theme = AppTheme.refinedDark
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var palette: Palette { theme.palette(colorScheme) }
 
     var body: some View {
         ZStack {
-            Theme.bg.ignoresSafeArea()
             if model.connected {
                 connectedView
             } else {
@@ -30,6 +24,16 @@ struct ContentView: View {
             }
         }
         .frame(minWidth: 360, minHeight: 500)
+        .background(palette.background)
+        .environment(\.appTheme, theme)
+        .onAppear { applyAppearance(theme) }
+        .onChange(of: theme, perform: applyAppearance)
+    }
+
+    // Not .preferredColorScheme: on macOS, once it has forced a window dark, setting it back to nil
+    // doesn't return the window to the system appearance, so Native Glass would stay dark until relaunch.
+    private func applyAppearance(_ theme: AppTheme) {
+        NSApp.appearance = theme.colorScheme == .dark ? NSAppearance(named: .darkAqua) : nil
     }
 
     // MARK: - Disconnected
@@ -39,24 +43,24 @@ struct ContentView: View {
             Spacer()
             Image(systemName: "headphones")
                 .font(.system(size: 64, weight: .thin))
-                .foregroundColor(Theme.secondary)
+                .foregroundColor(palette.secondary)
             Text("No headphones connected")
                 .font(.system(size: 15, weight: .medium))
-                .foregroundColor(Theme.secondary)
+                .foregroundColor(palette.secondary)
             if let error = model.errorMessage {
                 Text(error)
                     .font(.system(size: 12))
-                    .foregroundColor(.red.opacity(0.9))
+                    .foregroundColor(palette.danger)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 32)
             }
             Button(action: model.connect) {
                 Text(model.connecting ? "Connecting…" : "Connect headphones")
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.white)
+                    .foregroundColor(palette.onAccent)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
-                    .background(Theme.accent)
+                    .background(palette.accent)
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
             .buttonStyle(PlainButtonStyle())
@@ -91,7 +95,7 @@ struct ContentView: View {
                 if let error = model.errorMessage {
                     Text(error)
                         .font(.system(size: 12))
-                        .foregroundColor(.red.opacity(0.9))
+                        .foregroundColor(palette.danger)
                 }
             }
             .padding(20)
@@ -103,41 +107,23 @@ struct ContentView: View {
             HStack(spacing: 10) {
                 Spacer()
                 Button(action: { showAbout = true }) {
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundColor(Theme.secondary)
-                        .frame(width: 32, height: 32)
-                        .background(Theme.card)
-                        .clipShape(Circle())
+                    roundIcon("ellipsis", size: 15)
                 }
                 .buttonStyle(PlainButtonStyle())
                 .popover(isPresented: $showAbout, arrowEdge: .bottom) { aboutView }
                 Button(action: model.disconnect) {
-                    Image(systemName: "power")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(Theme.secondary)
-                        .frame(width: 32, height: 32)
-                        .background(Theme.card)
-                        .clipShape(Circle())
+                    roundIcon("power", size: 14)
                 }
                 .buttonStyle(PlainButtonStyle())
             }
 
             // Product-style banner. Generic headphone graphic (device-specific Sony renders are
-            // copyrighted and can't be bundled) over a soft accent halo, mirroring Sony's app layout.
+            // copyrighted and can't be bundled) over the theme's backdrop, mirroring Sony's app layout.
             ZStack {
-                // Soft accent glow behind the product for depth.
-                Circle()
-                    .fill(
-                        RadialGradient(
-                            gradient: Gradient(colors: [Theme.accent.opacity(0.22), Theme.accent.opacity(0.0)]),
-                            center: .center, startRadius: 4, endRadius: 104
-                        )
-                    )
-                    .frame(width: 210, height: 210)
+                HeroBackdrop()
 
                 if let image = deviceImage() {
-                    // Background-removed product cutout floating on the dark UI.
+                    // Background-removed product cutout floating on the backdrop.
                     Image(nsImage: image)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
@@ -145,82 +131,124 @@ struct ContentView: View {
                 } else {
                     Image(systemName: "headphones")
                         .font(.system(size: 92, weight: .thin))
-                        .foregroundColor(.white)
+                        .foregroundColor(palette.primary)
                 }
             }
 
             Text(model.deviceName)
                 .font(.system(size: 24, weight: .bold))
-                .foregroundColor(.white)
+                .foregroundColor(palette.primary)
 
-            HStack(spacing: 7) {
-                if model.hasDualBattery {
-                    // Earbuds report a battery each, plus the case when it's connected. An earbud that
-                    // isn't reporting (docked / powered down) comes through as -1 and is left out.
-                    budBattery("L", model.batteryLeft, charging: model.batteryLeftCharging)
-                    budBattery("R", model.batteryRight, charging: model.batteryRightCharging)
-                    if model.batteryCase >= 0 {
-                        budBattery("Case", model.batteryCase, charging: model.batteryCaseCharging)
+            HStack(spacing: 6) {
+                chip {
+                    if model.hasDualBattery {
+                        // Earbuds report a battery each, plus the case when it's connected. An earbud that
+                        // isn't reporting (docked / powered down) comes through as -1 and is left out.
+                        budBattery("L", model.batteryLeft, charging: model.batteryLeftCharging)
+                        Text("·")
+                        budBattery("R", model.batteryRight, charging: model.batteryRightCharging)
+                        if model.batteryCase >= 0 {
+                            Text("·")
+                            budBattery("Case", model.batteryCase, charging: model.batteryCaseCharging)
+                        }
+                    } else if model.batteryLevel >= 0 {
+                        Image(systemName: model.batteryCharging ? "bolt.fill" : batterySymbol(model.batteryLevel))
+                            .foregroundColor(model.batteryLevel <= 20 ? palette.danger : palette.accent)
+                        chipText("\(model.batteryLevel)%")
+                    } else {
+                        Circle().fill(palette.accent).frame(width: 6, height: 6)
+                        chipText("Connected")
                     }
-                } else if model.batteryLevel >= 0 {
-                    Image(systemName: model.batteryCharging ? "bolt.fill" : batterySymbol(model.batteryLevel))
-                        .font(.system(size: 13))
-                        .foregroundColor(model.batteryLevel <= 20 ? .red.opacity(0.9) : Theme.accent)
-                    Text("\(model.batteryLevel)%")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(Theme.secondary)
-                } else {
-                    Circle().fill(Theme.accent).frame(width: 7, height: 7)
-                    Text("Connected")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(Theme.secondary)
                 }
                 if !model.codec.isEmpty {
-                    Text("·").foregroundColor(Theme.secondary)
-                    Text(model.codec)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(Theme.secondary)
+                    chip { chipText(model.codec) }
                 }
+                chip { chipText(modeName(model.mode)) }
             }
         }
         .padding(.bottom, 4)
     }
 
-    private var ambientCard: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Ambient Sound Control")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundColor(.white)
-            HStack(spacing: 0) {
-                modeButton(.noiseCanceling, "speaker.slash.fill", "Noise\nCanceling")
-                modeButton(.ambientSound, "wind", "Ambient\nSound")
-                modeButton(.off, "circle", "Off")
-            }
-        }
-        .padding(18)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.card)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    private func roundIcon(_ symbol: String, size: CGFloat) -> some View {
+        Image(systemName: symbol)
+            .font(.system(size: size, weight: .semibold))
+            .foregroundColor(palette.secondary)
+            .frame(width: 32, height: 32)
+            .background(palette.raised, in: Circle())
+            .overlay(Circle().strokeBorder(palette.cardStroke, lineWidth: 1))
     }
 
-    private func modeButton(_ mode: SHCAmbientMode, _ symbol: String, _ label: String) -> some View {
+    private func chip<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        HStack(spacing: 4, content: content)
+            .font(.system(size: theme.isSignature ? 10 : 11, weight: .semibold))
+            .foregroundColor(palette.secondary)
+            .lineLimit(1)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4)
+            .background(palette.raised, in: Capsule())
+            .overlay(Capsule().strokeBorder(palette.cardStroke, lineWidth: 1))
+    }
+
+    private func chipText(_ text: String) -> Text {
+        Text(theme.isSignature ? text.uppercased() : text).tracking(theme.isSignature ? 0.8 : 0)
+    }
+
+    private func cardTitle(_ title: String) -> some View {
+        Text(theme.isSignature ? title.uppercased() : title)
+            .font(.system(size: theme.isSignature ? 11 : 15, weight: .semibold))
+            .tracking(theme.isSignature ? 1.2 : 0)
+            .foregroundColor(theme.isSignature ? palette.secondary : palette.primary)
+    }
+
+    private func modeName(_ mode: SHCAmbientMode) -> String {
+        switch mode {
+        case .noiseCanceling: return "Noise Canceling"
+        case .ambientSound: return "Ambient"
+        default: return "Off"
+        }
+    }
+
+    // Selected/idle look shared by the mode control and the EQ presets: pills in Sony Signature,
+    // rounded segments otherwise. The content shape keeps clear (idle) segments clickable.
+    private func selectable<Label: View>(_ label: Label, selected: Bool, idleFill: Color) -> some View {
+        let shape = RoundedRectangle(cornerRadius: theme.isSignature ? 15 : 8, style: .continuous)
+        return label
+            .foregroundColor(selected ? palette.selectedText : palette.secondary)
+            .background(selected ? palette.selectedFill : idleFill, in: shape)
+            .overlay(shape.strokeBorder(selected ? palette.selectedStroke
+                                        : (theme.isSignature ? palette.cardStroke : .clear), lineWidth: 1))
+            .contentShape(shape)
+    }
+
+    private var ambientCard: some View {
+        let track = RoundedRectangle(cornerRadius: 11, style: .continuous)
+        return VStack(alignment: .leading, spacing: 16) {
+            cardTitle("Ambient Sound Control")
+            HStack(spacing: theme.isSignature ? 6 : 0) {
+                modeButton(.noiseCanceling)
+                modeButton(.ambientSound)
+                modeButton(.off)
+            }
+            .padding(theme.isSignature ? 0 : 3)
+            .background(palette.track, in: track)
+            .overlay(track.strokeBorder(theme.isSignature ? .clear : palette.cardStroke, lineWidth: 1))
+        }
+        .themedCard()
+    }
+
+    private func modeButton(_ mode: SHCAmbientMode) -> some View {
         let selected = model.mode == mode
         return Button(action: { model.setMode(mode) }) {
-            VStack(spacing: 8) {
-                ZStack {
-                    Circle()
-                        .fill(selected ? Theme.accent : Theme.cardHi)
-                        .frame(width: 58, height: 58)
-                    Image(systemName: symbol)
-                        .font(.system(size: 22, weight: .medium))
-                        .foregroundColor(selected ? .white : Theme.secondary)
-                }
-                Text(label)
-                    .font(.system(size: 11, weight: .medium))
-                    .multilineTextAlignment(.center)
-                    .foregroundColor(selected ? .white : Theme.secondary)
-            }
-            .frame(maxWidth: .infinity)
+            selectable(
+                Text(modeName(mode))
+                    .font(.system(size: 12, weight: .semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8),
+                selected: selected, idleFill: .clear
+            )
+            .shadow(color: selected ? palette.selectedShadow : .clear, radius: 8)
         }
         .buttonStyle(.plain)
     }
@@ -230,11 +258,11 @@ struct ContentView: View {
             HStack {
                 Text("Ambient Sound Level")
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(Theme.secondary)
+                    .foregroundColor(palette.secondary)
                 Spacer()
                 Text("\(model.ambientLevel)")
-                    .font(.system(size: 20, weight: .bold, design: .rounded))
-                    .foregroundColor(Theme.accent)
+                    .font(.system(size: 20, weight: .bold, design: theme.isSignature ? .monospaced : .rounded))
+                    .foregroundColor(palette.accentText)
             }
             Slider(
                 value: Binding(
@@ -244,7 +272,7 @@ struct ContentView: View {
                 in: 1...Double(model.maxAmbientLevel),
                 step: 1
             )
-            .accentColor(Theme.accent)
+            .accentColor(palette.accent)
 
             if model.focusOnVoiceAvailable {
                 Toggle(isOn: Binding(
@@ -253,15 +281,12 @@ struct ContentView: View {
                 )) {
                     Text("Focus on Voice")
                         .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(.white)
+                        .foregroundColor(palette.primary)
                 }
-                .toggleStyle(SwitchToggleStyle(tint: Theme.accent))
+                .toggleStyle(SwitchToggleStyle(tint: palette.accent))
             }
         }
-        .padding(18)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.card)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .themedCard()
     }
 
     private let eqPresets: [(String, Int)] = [
@@ -278,16 +303,15 @@ struct ContentView: View {
 
     private var equalizerCard: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Equalizer")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundColor(.white)
+            cardTitle("Equalizer")
+            EQPreview(bands: model.eqBands, range: model.tenBandEqualizer ? 0...12 : -10...10)
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
                 ForEach(model.tenBandEqualizer ? tenBandEqPresets : eqPresets, id: \.1) { preset in
                     eqChip(preset.0, preset.1)
                 }
             }
             if model.eqPreset == 0xA0 {
-                Divider().background(Theme.cardHi)
+                Divider().background(palette.cardStroke)
                 let labels = model.tenBandEqualizer ? tenBandEqLabels : eqBandLabels
                 ForEach(0..<min(model.eqBands.count, labels.count), id: \.self) { i in
                     eqBandRow(labels[i], value: Binding(
@@ -303,10 +327,7 @@ struct ContentView: View {
                 }
             }
         }
-        .padding(18)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.card)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .themedCard()
     }
 
     // raw: the ten-band layout's 0...12 device steps (no dB mapping is known yet), shown unsigned.
@@ -314,12 +335,12 @@ struct ContentView: View {
         HStack(spacing: 10) {
             Text(label)
                 .font(.system(size: 11, weight: .medium))
-                .foregroundColor(accent ? Theme.accent : Theme.secondary)
+                .foregroundColor(accent ? palette.accentText : palette.secondary)
                 .frame(width: 34, alignment: .leading)
-            Slider(value: value, in: raw ? 0...12 : -10...10, step: 1).accentColor(Theme.accent)
+            Slider(value: value, in: raw ? 0...12 : -10...10, step: 1).accentColor(palette.accent)
             Text(raw ? "\(display)" : "\(display > 0 ? "+" : "")\(display)")
                 .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                .foregroundColor(.white)
+                .foregroundColor(palette.primary)
                 .frame(width: 26, alignment: .trailing)
         }
     }
@@ -327,27 +348,24 @@ struct ContentView: View {
     private var dseeCard: some View {
         Toggle(isOn: Binding(get: { model.dsee }, set: { model.setDsee($0) })) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("DSEE").font(.system(size: 14, weight: .semibold)).foregroundColor(.white)
-                Text("Upscale compressed audio").font(.system(size: 11)).foregroundColor(Theme.secondary)
+                Text("DSEE").font(.system(size: 14, weight: .semibold)).foregroundColor(palette.primary)
+                Text("Upscale compressed audio").font(.system(size: 11)).foregroundColor(palette.secondary)
             }
         }
-        .toggleStyle(SwitchToggleStyle(tint: Theme.accent))
-        .padding(18)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.card)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .toggleStyle(SwitchToggleStyle(tint: palette.accent))
+        .themedCard()
     }
 
     private func eqChip(_ name: String, _ code: Int) -> some View {
         let selected = model.eqPreset == code
         return Button(action: { model.setEqualizer(code) }) {
-            Text(name)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundColor(selected ? .white : Theme.secondary)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
-                .background(selected ? Theme.accent : Theme.cardHi)
-                .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            selectable(
+                Text(name)
+                    .font(.system(size: 12, weight: .medium))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8),
+                selected: selected, idleFill: palette.track
+            )
         }
         .buttonStyle(PlainButtonStyle())
     }
@@ -356,9 +374,7 @@ struct ContentView: View {
 
     private var settingsCard: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Settings")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundColor(.white)
+            cardTitle("Settings")
             if model.hasAdaptiveVolume {
                 settingToggle("Adaptive Volume", "Auto-adjust volume by surroundings",
                               on: model.adaptiveVolume) { model.setAdaptiveVolume($0) }
@@ -369,9 +385,9 @@ struct ContentView: View {
                 Toggle(isOn: $model.keepSpeakToChatOff) {
                     Text("Keep off on connect")
                         .font(.system(size: 11))
-                        .foregroundColor(Theme.secondary)
+                        .foregroundColor(palette.secondary)
                 }
-                .toggleStyle(SwitchToggleStyle(tint: Theme.accent))
+                .toggleStyle(SwitchToggleStyle(tint: palette.accent))
                 .controlSize(.small)
                 .padding(.leading, 12)
             }
@@ -382,8 +398,8 @@ struct ContentView: View {
             if model.hasAutoPowerOff {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Auto Power-Off").font(.system(size: 14, weight: .semibold)).foregroundColor(.white)
-                        Text("Turn off when idle").font(.system(size: 11)).foregroundColor(Theme.secondary)
+                        Text("Auto Power-Off").font(.system(size: 14, weight: .semibold)).foregroundColor(palette.primary)
+                        Text("Turn off when idle").font(.system(size: 11)).foregroundColor(palette.secondary)
                     }
                     Spacer()
                     Picker("", selection: Binding(
@@ -394,33 +410,28 @@ struct ContentView: View {
                     }
                     .pickerStyle(MenuPickerStyle())
                     .frame(width: 130)
-                    .accentColor(Theme.accent)
+                    .accentColor(palette.accent)
                 }
             }
         }
-        .padding(18)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.card)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .themedCard()
     }
 
     private func settingToggle(_ title: String, _ subtitle: String, on: Bool, action: @escaping (Bool) -> Void) -> some View {
         Toggle(isOn: Binding(get: { on }, set: { action($0) })) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.system(size: 14, weight: .semibold)).foregroundColor(.white)
-                Text(subtitle).font(.system(size: 11)).foregroundColor(Theme.secondary)
+                Text(title).font(.system(size: 14, weight: .semibold)).foregroundColor(palette.primary)
+                Text(subtitle).font(.system(size: 11)).foregroundColor(palette.secondary)
             }
         }
-        .toggleStyle(SwitchToggleStyle(tint: Theme.accent))
+        .toggleStyle(SwitchToggleStyle(tint: palette.accent))
     }
 
     // Multipoint device list. Read-only for now: nothing here sends a command that changes the headset.
     private var devicesCard: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Text("Devices")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(.white)
+                cardTitle("Devices")
                 Spacer()
                 if model.multipointLoading || model.refreshingMultipoint || model.multipointBusy {
                     ProgressView()
@@ -430,7 +441,7 @@ struct ContentView: View {
                     Button(action: model.refreshMultipoint) {
                         Image(systemName: "arrow.clockwise")
                             .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(Theme.secondary)
+                            .foregroundColor(palette.secondary)
                     }
                     .buttonStyle(PlainButtonStyle())
                 }
@@ -442,7 +453,7 @@ struct ContentView: View {
                         .frame(width: 18, height: 18)
                     Text("Reading devices from the headset…")
                         .font(.system(size: 12))
-                        .foregroundColor(Theme.secondary)
+                        .foregroundColor(palette.secondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, 6)
@@ -450,19 +461,19 @@ struct ContentView: View {
             if model.hasPlaybackPinState {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Playback device").font(.system(size: 13, weight: .medium)).foregroundColor(.white)
+                        Text("Playback device").font(.system(size: 13, weight: .medium)).foregroundColor(palette.primary)
                         Text(model.playbackPinned ? "Fixed" : "Switches automatically")
-                            .font(.system(size: 11)).foregroundColor(Theme.secondary)
+                            .font(.system(size: 11)).foregroundColor(palette.secondary)
                     }
                     Spacer()
                     Button(action: { model.setPlaybackPinned(!model.playbackPinned) }) {
                         Text(model.playbackPinned ? "Unfix" : "Fix")
                             .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(.white)
+                            .foregroundColor(palette.primary)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 5)
-                            .background(Theme.cardHi)
-                            .clipShape(Capsule())
+                            .background(palette.raised, in: Capsule())
+                            .overlay(Capsule().strokeBorder(palette.cardStroke, lineWidth: 1))
                     }
                     .buttonStyle(PlainButtonStyle())
                     .disabled(model.multipointBusy)
@@ -472,50 +483,48 @@ struct ContentView: View {
                 let connected = model.pairedDevices.filter { $0.connected }.sorted { $0.slot < $1.slot }
                 let paired = model.pairedDevices.filter { !$0.connected }
                 if !connected.isEmpty {
-                    devicesSectionLabel("Connected")
+                    sectionLabel("Connected")
                     ForEach(connected) { deviceRow($0) }
                 }
                 if !paired.isEmpty {
-                    devicesSectionLabel("Paired")
+                    sectionLabel("Paired")
                     ForEach(paired) { deviceRow($0) }
                 }
             } else if !model.multipointLoading {
                 Text("This headset didn't return a device list.")
                     .font(.system(size: 12))
-                    .foregroundColor(Theme.secondary)
+                    .foregroundColor(palette.secondary)
             }
             if !model.multipointLoading {
                 devicesFooter
             }
         }
-        .padding(18)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.card)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .themedCard()
     }
 
     private var devicesFooter: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Divider().background(Theme.cardHi)
+            Divider().background(palette.cardStroke)
             HStack {
                 Text(model.multipointBusy ? "Sending…" : "Switching and fixing are experimental")
                     .font(.system(size: 11))
-                    .foregroundColor(Theme.secondary.opacity(0.7))
+                    .foregroundColor(palette.secondary.opacity(0.7))
                 Spacer()
                 Button(action: copyMultipointDiagnostics) {
                     Text("Copy diagnostics")
                         .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(Theme.accent)
+                        .foregroundColor(palette.accentText)
                 }
                 .buttonStyle(PlainButtonStyle())
             }
         }
     }
 
-    private func devicesSectionLabel(_ text: String) -> some View {
+    private func sectionLabel(_ text: String) -> some View {
         Text(text.uppercased())
             .font(.system(size: 10, weight: .semibold))
-            .foregroundColor(Theme.secondary.opacity(0.8))
+            .tracking(0.8)
+            .foregroundColor(palette.secondary.opacity(0.8))
             .padding(.top, 2)
     }
 
@@ -523,15 +532,15 @@ struct ContentView: View {
         HStack(spacing: 12) {
             Image(systemName: deviceSymbol(device.classOfDevice))
                 .font(.system(size: 15))
-                .foregroundColor(device.connected ? .white : Theme.secondary)
+                .foregroundColor(device.connected ? palette.primary : palette.secondary)
                 .frame(width: 22)
             VStack(alignment: .leading, spacing: 2) {
                 Text(device.name.isEmpty ? device.address : device.name)
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(device.connected ? .white : Theme.secondary)
+                    .foregroundColor(device.connected ? palette.primary : palette.secondary)
                     .lineLimit(1)
                 if device.isThisMac {
-                    Text("This Mac").font(.system(size: 11)).foregroundColor(Theme.accent)
+                    Text("This Mac").font(.system(size: 11)).foregroundColor(palette.accentText)
                 }
             }
             Spacer()
@@ -539,11 +548,11 @@ struct ContentView: View {
                 if model.playbackPinned {
                     Image(systemName: "lock.fill")
                         .font(.system(size: 11))
-                        .foregroundColor(Theme.accent)
+                        .foregroundColor(palette.accent)
                 }
                 Image(systemName: "speaker.wave.2.fill")
                     .font(.system(size: 12))
-                    .foregroundColor(Theme.accent)
+                    .foregroundColor(palette.accent)
             }
             if device.connected && model.hasPlaybackPinState {
                 Menu {
@@ -582,7 +591,7 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 0) {
             Text(model.deviceName)
                 .font(.system(size: 15, weight: .bold))
-                .foregroundColor(.white)
+                .foregroundColor(palette.primary)
                 .padding(.bottom, 10)
             aboutRow("Status", model.connected ? "Connected" : "Disconnected")
             if model.hasDualBattery {
@@ -598,14 +607,41 @@ struct ContentView: View {
             if !model.firmware.isEmpty { aboutRow("Firmware", model.firmware) }
             if !model.protocolVersion.isEmpty { aboutRow("Protocol", model.protocolVersion) }
             if !model.deviceMac.isEmpty { aboutRow("Bluetooth", model.deviceMac) }
-            Divider().background(Theme.cardHi).padding(.vertical, 10)
+            sectionLabel("Appearance")
+                .padding(.top, 12)
+                .padding(.bottom, 8)
+            HStack(spacing: 6) {
+                ForEach(AppTheme.allCases) { option in
+                    themeOption(option)
+                }
+            }
+            Divider().background(palette.cardStroke).padding(.vertical, 10)
             Text("SonyBridge · not affiliated with Sony")
                 .font(.system(size: 10))
-                .foregroundColor(Theme.secondary.opacity(0.7))
+                .foregroundColor(palette.secondary.opacity(0.7))
         }
         .padding(18)
-        .frame(width: 260)
-        .background(Theme.card)
+        .frame(width: 290)
+        .background(palette.card)
+    }
+
+    private func themeOption(_ option: AppTheme) -> some View {
+        let selected = option == theme
+        return Button(action: { theme = option }) {
+            VStack(spacing: 5) {
+                ThemeSwatch(theme: option)
+                Text(option.displayName)
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundColor(selected ? palette.primary : palette.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .padding(5)
+            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(selected ? palette.accent : .clear, lineWidth: 2))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PlainButtonStyle())
     }
 
     private func batteryText(_ level: Int, _ charging: Bool) -> String {
@@ -615,9 +651,9 @@ struct ContentView: View {
 
     private func aboutRow(_ label: String, _ value: String) -> some View {
         HStack {
-            Text(label).font(.system(size: 12)).foregroundColor(Theme.secondary)
+            Text(label).font(.system(size: 12)).foregroundColor(palette.secondary)
             Spacer()
-            Text(value).font(.system(size: 12, weight: .medium)).foregroundColor(.white)
+            Text(value).font(.system(size: 12, weight: .medium)).foregroundColor(palette.primary)
         }
         .padding(.vertical, 3)
     }
@@ -628,18 +664,16 @@ struct ContentView: View {
         return NSImage(named: slug)
     }
 
-    // One "L 82%" chip, with a bolt in place of the battery glyph while that unit is charging.
-    // A docked/powered-down earbud reports no level; show it dimmed as "R --" rather than dropping the
-    // chip, so it reads as "in the case" instead of looking like the app lost track of it.
+    // One "L 82%" reading in the battery chip, with a bolt in place of the battery glyph while that unit
+    // is charging. A docked/powered-down earbud reports no level; show it dimmed as "R --" rather than
+    // dropping it, so it reads as "in the case" instead of looking like the app lost track of it.
     private func budBattery(_ label: String, _ level: Int, charging: Bool) -> some View {
         HStack(spacing: 3) {
             Image(systemName: level < 0 ? "battery.0" : (charging ? "bolt.fill" : batterySymbol(level)))
-                .font(.system(size: 12))
-                .foregroundColor(level < 0 ? Theme.secondary.opacity(0.5)
-                                 : (level <= 20 && !charging ? .red.opacity(0.9) : Theme.accent))
-            Text(level < 0 ? "\(label) --" : "\(label) \(level)%")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(Theme.secondary.opacity(level < 0 ? 0.5 : 1.0))
+                .foregroundColor(level < 0 ? palette.secondary.opacity(0.5)
+                                 : (level <= 20 && !charging ? palette.danger : palette.accent))
+            chipText(level < 0 ? "\(label) --" : "\(label) \(level)%")
+                .foregroundColor(palette.secondary.opacity(level < 0 ? 0.5 : 1.0))
         }
     }
 
@@ -820,7 +854,6 @@ struct ContentView: View {
 }
 
 // Factory so the Obj-C++ ViewController can instantiate the SwiftUI hierarchy.
-@available(macOS 11.0, *)
 @objc final class HeadphonesUIFactory: NSObject {
     @objc static func makeViewController() -> NSViewController {
         return NSHostingController(rootView: ContentView())
