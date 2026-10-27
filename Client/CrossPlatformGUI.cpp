@@ -462,9 +462,11 @@ void CrossPlatformGUI::_drawEqualizer()
 		for (int i = 0; i < 6; ++i)
 		{
 			std::string id = "##eqband" + std::to_string(i);
-			std::string fmt = std::string(bandNames[i]) + "   %d";
+			std::string fmt = std::string(bandNames[i]) + "   %+d";
 			ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
-			if (ImGui::SliderInt(id.c_str(), values[i], 0, 10, fmt.c_str()))
+			// Range is -10..+10 on the wire: Headphones::setEqualizerCustom() clamps to that and sends
+			// value+10, and requestEqualizer() decodes byte-10. A 0..10 slider could only ever boost.
+			if (ImGui::SliderInt(id.c_str(), values[i], -10, 10, fmt.c_str()))
 				changed = true;
 		}
 		if (changed)
