@@ -6,6 +6,8 @@
 import Foundation
 import Combine
 
+private let keepSpeakToChatOffKey = "KeepSpeakToChatOffOnConnect"
+
 struct PairedDeviceInfo: Identifiable, Equatable {
     let name: String
     let address: String
@@ -45,6 +47,7 @@ final class HeadphonesModel: ObservableObject {
     @Published var supportsEqualizer = false
     @Published var eqBands = [0, 0, 0, 0, 0]
     @Published var clearBass = 0
+    @Published var supportsDsee = false
     @Published var dsee = false
 
     @Published var hasAutoPowerOff = false
@@ -53,6 +56,11 @@ final class HeadphonesModel: ObservableObject {
     @Published var codec = ""
     @Published var hasSpeakToChat = false
     @Published var speakToChat = false
+    // Force Speak-to-Chat off each time we connect (it pauses audio whenever it hears
+    // speech, which is hostile to dictation). Flipping this takes effect next connect.
+    @Published var keepSpeakToChatOff = UserDefaults.standard.object(forKey: keepSpeakToChatOffKey) as? Bool ?? true {
+        didSet { UserDefaults.standard.set(keepSpeakToChatOff, forKey: keepSpeakToChatOffKey) }
+    }
     @Published var hasAdaptiveVolume = false
     @Published var adaptiveVolume = false
     @Published var deviceMac = ""
@@ -62,6 +70,8 @@ final class HeadphonesModel: ObservableObject {
     @Published var pairedDevices: [PairedDeviceInfo] = []
     @Published var hasPlaybackPinState = false
     @Published var playbackPinned = false
+    // Multipoint ("Connect to 2 devices"). Device-persistent - no app-enforced default; the
+    // toggle just mirrors the on-device state.
     @Published var hasMultipointSetting = false
     @Published var multipointEnabled = false
     @Published var multipointDiagnostics = ""
@@ -79,6 +89,19 @@ final class HeadphonesModel: ObservableObject {
     private var pollTimer: Timer?
     private var dynamicTimer: Timer?
 
+    // Slider-drag coalescing (mirrors the ImGui in-flight gate in CrossPlatformGUI).
+    // While an exchange is in flight, only the latest value is remembered; when the
+    // exchange completes, at most one more send fires with that latest value. All
+    // state is main-thread-confined (bridge completions arrive on the main queue).
+    private var pushInFlight = false
+    private var pendingPush: (mode: SHCAmbientMode, level: Int, focusVoice: Bool)?
+    private var eqInFlight = false
+    private var pendingEq: (bass: Int, bands: [Int])?
+
+    // Armed on each successful connect; consumed once Speak-to-Chat capability is
+    // confirmed, so the off-on-connect enforcement fires at most once per connection.
+    private var s2cAutoDisablePending = false
+
     func connect() {
         connecting = true
         errorMessage = nil
@@ -87,6 +110,7 @@ final class HeadphonesModel: ObservableObject {
             self.bridge.scanAndConnect { ok, error in
                 self.connecting = false
                 if ok {
+                    self.s2cAutoDisablePending = true
                     self.syncFromBridge()
                     self.startWatchingConnection()
                     self.refreshStatus()
@@ -107,7 +131,9 @@ final class HeadphonesModel: ObservableObject {
             self.batteryRight = self.bridge.batteryRight
             self.batteryCase = self.bridge.batteryCase
             self.eqPreset = self.bridge.eqPreset
+            self.supportsEqualizer = self.bridge.supportsEqualizer
             self.clearBass = self.bridge.clearBass
+            self.supportsDsee = self.bridge.supportsDsee
             self.dsee = self.bridge.dsee
             self.eqBands = (0..<5).map { self.bridge.equalizerBand(at: $0) }
             self.hasAutoPowerOff = self.bridge.hasAutoPowerOff
@@ -119,6 +145,15 @@ final class HeadphonesModel: ObservableObject {
             self.hasAdaptiveVolume = self.bridge.hasAdaptiveVolume
             self.adaptiveVolume = self.bridge.adaptiveVolume
             self.syncMultipointFromBridge()
+            // Speak-to-Chat capability is only confirmed by the probeCapabilities pass
+            // (the second completion), so this stays armed until then and fires at most
+            // once per connect. The device stays untouched unless it reports S2C on.
+            if self.s2cAutoDisablePending && self.hasSpeakToChat {
+                self.s2cAutoDisablePending = false
+                if self.keepSpeakToChatOff && self.speakToChat {
+                    self.setSpeakToChat(false)
+                }
+            }
         }
     }
 
@@ -181,6 +216,21 @@ final class HeadphonesModel: ObservableObject {
         bridge.setAdaptiveVolume(on) { ok, error in if !ok, let e = error { self.errorMessage = e } }
     }
 
+    func setMultipoint(_ on: Bool) {
+        multipointEnabled = on
+        errorMessage = nil
+        bridge.setMultipoint(on) { ok, error in if !ok, let e = error { self.errorMessage = e } }
+    }
+
+    // Every @Published setter fires objectWillChange — and a full ContentView body
+    // re-evaluation — even when the value is unchanged. The 2s poll mostly re-reads
+    // cached bridge values, so gate writes to real changes.
+    private func assignIfChanged<T: Equatable>(_ keyPath: ReferenceWritableKeyPath<HeadphonesModel, T>, _ newValue: T) {
+        if self[keyPath: keyPath] != newValue {
+            self[keyPath: keyPath] = newValue
+        }
+    }
+
     // Poll the button-changeable state so the app stays in sync when you use the headphone's own controls.
     private func startDynamicPolling() {
         stopDynamicPolling()
@@ -194,13 +244,15 @@ final class HeadphonesModel: ObservableObject {
                 self.bridge.refreshMultipoint { self.syncMultipointFromBridge() }
             }
             self.bridge.refreshDynamic {
-                self.mode = self.bridge.mode
+                self.assignIfChanged(\.mode, self.bridge.mode)
                 let level = self.bridge.ambientLevel
-                if level > 0 { self.ambientLevel = level }
-                self.eqPreset = self.bridge.eqPreset
-                self.clearBass = self.bridge.clearBass
-                self.dsee = self.bridge.dsee
-                self.eqBands = (0..<5).map { self.bridge.equalizerBand(at: $0) }
+                if level > 0 { self.assignIfChanged(\.ambientLevel, level) }
+                self.assignIfChanged(\.eqPreset, self.bridge.eqPreset)
+                self.assignIfChanged(\.supportsEqualizer, self.bridge.supportsEqualizer)
+                self.assignIfChanged(\.clearBass, self.bridge.clearBass)
+                self.assignIfChanged(\.supportsDsee, self.bridge.supportsDsee)
+                self.assignIfChanged(\.dsee, self.bridge.dsee)
+                self.assignIfChanged(\.eqBands, (0..<5).map { self.bridge.equalizerBand(at: $0) })
             }
         }
     }
@@ -211,6 +263,10 @@ final class HeadphonesModel: ObservableObject {
     }
 
     func setEqualizer(_ preset: Int) {
+        if preset == 0xA0 {
+            applyCustomEq()
+            return
+        }
         eqPreset = preset
         errorMessage = nil
         bridge.setEqualizerPreset(preset) { ok, error in
@@ -222,7 +278,24 @@ final class HeadphonesModel: ObservableObject {
     func applyCustomEq() {
         eqPreset = 0xA0
         errorMessage = nil
-        bridge.setCustomEqualizerBass(clearBass, bands: eqBands.map { NSNumber(value: $0) }) { ok, error in
+        if eqInFlight {
+            pendingEq = (clearBass, eqBands)
+            return
+        }
+        sendCustomEq((clearBass, eqBands))
+    }
+
+    private func sendCustomEq(_ sent: (bass: Int, bands: [Int])) {
+        eqInFlight = true
+        bridge.setCustomEqualizerBass(sent.bass, bands: sent.bands.map { NSNumber(value: $0) }) { ok, error in
+            self.eqInFlight = false
+            if let pending = self.pendingEq {
+                self.pendingEq = nil
+                if pending != sent {
+                    self.sendCustomEq(pending)
+                    return
+                }
+            }
             if !ok, let error = error { self.errorMessage = error }
         }
     }
@@ -238,6 +311,9 @@ final class HeadphonesModel: ObservableObject {
     func disconnect() {
         stopWatchingConnection()
         stopDynamicPolling()
+        pendingPush = nil
+        pendingEq = nil
+        s2cAutoDisablePending = false
         bridge.disconnect()
         connected = false
         deviceName = ""
@@ -256,6 +332,10 @@ final class HeadphonesModel: ObservableObject {
                 self.errorMessage = "Headphones disconnected."
                 self.stopWatchingConnection()
                 self.stopDynamicPolling()
+                // Release the dead session too, so a reconnect starts clean and the device list doesn't
+                // linger with Fix/Switch enabled.
+                self.bridge.disconnect()
+                self.syncMultipointFromBridge()
             }
         }
     }
@@ -282,7 +362,24 @@ final class HeadphonesModel: ObservableObject {
 
     private func pushState() {
         errorMessage = nil
-        bridge.applyMode(mode, level: ambientLevel, focusVoice: focusOnVoice) { ok, error in
+        if pushInFlight {
+            pendingPush = (mode, ambientLevel, focusOnVoice)
+            return
+        }
+        sendPush((mode, ambientLevel, focusOnVoice))
+    }
+
+    private func sendPush(_ sent: (mode: SHCAmbientMode, level: Int, focusVoice: Bool)) {
+        pushInFlight = true
+        bridge.applyMode(sent.mode, level: sent.level, focusVoice: sent.focusVoice) { ok, error in
+            self.pushInFlight = false
+            if let pending = self.pendingPush {
+                self.pendingPush = nil
+                if pending != sent {
+                    self.sendPush(pending)
+                    return
+                }
+            }
             if ok {
                 self.syncFromBridge()
             } else if let error = error {
@@ -292,17 +389,18 @@ final class HeadphonesModel: ObservableObject {
     }
 
     private func syncFromBridge() {
-        connected = bridge.connected
-        deviceName = bridge.deviceName ?? ""
-        deviceMac = bridge.deviceMac ?? ""
-        protocolVersion = bridge.protocolVersionString ?? ""
-        supportsVpt = bridge.supportsVpt
-        supportsEqualizer = bridge.supportsEqualizer
-        maxAmbientLevel = bridge.maxAmbientLevel
-        mode = bridge.mode
+        assignIfChanged(\.connected, bridge.connected)
+        assignIfChanged(\.deviceName, bridge.deviceName ?? "")
+        assignIfChanged(\.deviceMac, bridge.deviceMac ?? "")
+        assignIfChanged(\.protocolVersion, bridge.protocolVersionString ?? "")
+        assignIfChanged(\.supportsVpt, bridge.supportsVpt)
+        assignIfChanged(\.supportsEqualizer, bridge.supportsEqualizer)
+        assignIfChanged(\.supportsDsee, bridge.supportsDsee)
+        assignIfChanged(\.maxAmbientLevel, bridge.maxAmbientLevel)
+        assignIfChanged(\.mode, bridge.mode)
         let level = bridge.ambientLevel
-        if level > 0 { ambientLevel = level }
-        focusOnVoice = bridge.focusOnVoice
-        focusOnVoiceAvailable = bridge.focusOnVoiceAvailable
+        if level > 0 { assignIfChanged(\.ambientLevel, level) }
+        assignIfChanged(\.focusOnVoice, bridge.focusOnVoice)
+        assignIfChanged(\.focusOnVoiceAvailable, bridge.focusOnVoiceAvailable)
     }
 }

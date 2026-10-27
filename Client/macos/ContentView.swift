@@ -76,14 +76,16 @@ struct ContentView: View {
                 if model.mode == .ambientSound {
                     ambientLevelCard
                 }
-                if model.multipointLoading || !model.multipointDiagnostics.isEmpty {
+                if model.multipointLoading || model.hasPairedDevices || model.hasPlaybackPinState {
                     devicesCard
                 }
                 if model.supportsEqualizer {
                     equalizerCard
+                }
+                if model.supportsDsee {
                     dseeCard
                 }
-                if model.hasAdaptiveVolume || model.hasSpeakToChat || model.hasAutoPowerOff {
+                if model.hasAdaptiveVolume || model.hasSpeakToChat || model.hasAutoPowerOff || model.hasMultipointSetting {
                     settingsCard
                 }
                 if let error = model.errorMessage {
@@ -355,6 +357,18 @@ struct ContentView: View {
             if model.hasSpeakToChat {
                 settingToggle("Speak-to-Chat", "Pause music when you talk",
                               on: model.speakToChat) { model.setSpeakToChat($0) }
+                Toggle(isOn: $model.keepSpeakToChatOff) {
+                    Text("Keep off on connect")
+                        .font(.system(size: 11))
+                        .foregroundColor(Theme.secondary)
+                }
+                .toggleStyle(SwitchToggleStyle(tint: Theme.accent))
+                .controlSize(.small)
+                .padding(.leading, 12)
+            }
+            if model.hasMultipointSetting {
+                settingToggle("Connect to 2 devices", "Stay paired to two devices at once",
+                              on: model.multipointEnabled) { model.setMultipoint($0) }
             }
             if model.hasAutoPowerOff {
                 HStack {
@@ -424,9 +438,6 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, 6)
             }
-            if model.hasMultipointSetting {
-                devicesInfoRow("Connect to 2 devices", model.multipointEnabled ? "On" : "Off")
-            }
             if model.hasPlaybackPinState {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
@@ -489,14 +500,6 @@ struct ContentView: View {
                 }
                 .buttonStyle(PlainButtonStyle())
             }
-        }
-    }
-
-    private func devicesInfoRow(_ label: String, _ value: String) -> some View {
-        HStack {
-            Text(label).font(.system(size: 13, weight: .medium)).foregroundColor(.white)
-            Spacer()
-            Text(value).font(.system(size: 12)).foregroundColor(Theme.secondary)
         }
     }
 

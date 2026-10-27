@@ -1,0 +1,7 @@
+# id|data_type|sequence|payload|complete_frame
+mp_probe_get|0c|0|d6 d1|3e 0c 00 00 00 00 02 d6 d1 b5 3c
+mp_ret_on|0c|0|d7 d1 00 00|3e 0c 00 00 00 00 04 d7 d1 00 00 b8 3c
+mp_ret_off|0c|0|d7 d1 00 01|3e 0c 00 00 00 00 04 d7 d1 00 01 b9 3c
+mp_set_on|0c|0|d8 d1 00 00|3e 0c 00 00 00 00 04 d8 d1 00 00 b9 3c
+mp_set_off|0c|0|d8 d1 00 01|3e 0c 00 00 00 00 04 d8 d1 00 01 ba 3c
+mp_apply_commit|0c|0|98 00 06 01|3e 0c 00 00 00 00 04 98 00 06 01 af 3c

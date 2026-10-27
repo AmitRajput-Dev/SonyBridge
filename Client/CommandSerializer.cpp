@@ -4,7 +4,7 @@ constexpr unsigned char ESCAPED_BYTE_SENTRY = 61;
 constexpr unsigned char ESCAPED_60 = 44;
 constexpr unsigned char ESCAPED_61 = 45;
 constexpr unsigned char ESCAPED_62 = 46;
-constexpr int MAX_STEPS_WH_1000_XM3 = 19;
+constexpr int MAX_AMBIENT_SOUND_LEVEL_V1 = 20;
 
 namespace CommandSerializer
 {
@@ -53,7 +53,7 @@ namespace CommandSerializer
 			{
 				if (i == src.size() - 1)
 				{
-					throw std::runtime_error("No data left for escaped byte data");
+					throw RecoverableException("No data left for escaped byte data", true);
 				}
 				i = i + 1;
 				switch (src[i])
@@ -71,7 +71,7 @@ namespace CommandSerializer
 					break;
 
 				default:
-					throw std::runtime_error("Unexpected escaped byte");
+					throw RecoverableException("Unexpected escaped byte", true);
 					break;
 				}
 			}
@@ -141,7 +141,7 @@ namespace CommandSerializer
 		//1 (type) + 1 (seq) + 4 (size) + 1 (checksum) = 7 bytes minimum, before any payload.
 		if (unescaped.size() < 7)
 		{
-			throw std::runtime_error("Invalid message: Smaller than the minimum message size");
+			throw RecoverableException("Invalid message: Smaller than the minimum message size", true);
 		}
 
 		unsigned int dataSize =
@@ -150,9 +150,13 @@ namespace CommandSerializer
 			((unsigned int)(unsigned char)unescaped[4] << 8) |
 			((unsigned int)(unsigned char)unescaped[5]);
 
-		if (unescaped.size() < (size_t)6 + dataSize + 1)
+		if (dataSize > unescaped.size() - 7)
 		{
 			throw RecoverableException("Invalid message: declared size exceeds received data", true);
+		}
+		if (dataSize != unescaped.size() - 7)
+		{
+			throw RecoverableException("Invalid message: trailing data after checksum", true);
 		}
 
 		//Checksum covers everything from DATA_TYPE up to (not including) the checksum byte, over the unescaped bytes.
@@ -168,32 +172,18 @@ namespace CommandSerializer
 		return ret;
 	}
 
-	NC_DUAL_SINGLE_VALUE getDualSingleForAsmLevel(char asmLevel)
+	Buffer serializeNcAndAsmSetting(NC_ASM_EFFECT ncAsmEffect, NC_ASM_SETTING_TYPE ncAsmSettingType, NC_DUAL_SINGLE_VALUE ncValue, ASM_SETTING_TYPE asmSettingType, ASM_ID asmId, char asmLevel)
 	{
-		NC_DUAL_SINGLE_VALUE val = NC_DUAL_SINGLE_VALUE::OFF;
-		if (asmLevel > MAX_STEPS_WH_1000_XM3)
+		if (asmLevel < 0 || asmLevel > MAX_AMBIENT_SOUND_LEVEL_V1)
 		{
-			throw std::runtime_error("Exceeded max steps");
+			throw std::runtime_error("Ambient sound level must be between 0 and 20");
 		}
-		else if (asmLevel == 1)
-		{
-			val = NC_DUAL_SINGLE_VALUE::SINGLE;
-		}
-		else if (asmLevel == 0)
-		{
-			val = NC_DUAL_SINGLE_VALUE::DUAL;
-		}
-		return val;
-	}
-
-	Buffer serializeNcAndAsmSetting(NC_ASM_EFFECT ncAsmEffect, NC_ASM_SETTING_TYPE ncAsmSettingType, ASM_SETTING_TYPE asmSettingType, ASM_ID asmId, char asmLevel)
-	{
 		Buffer ret;
 		ret.push_back(static_cast<unsigned char>(COMMAND_TYPE::NCASM_SET_PARAM));
 		ret.push_back(static_cast<unsigned char>(NC_ASM_INQUIRED_TYPE::NOISE_CANCELLING_AND_AMBIENT_SOUND_MODE));
 		ret.push_back(static_cast<unsigned char>(ncAsmEffect));
 		ret.push_back(static_cast<unsigned char>(ncAsmSettingType));
-		ret.push_back(static_cast<unsigned char>(getDualSingleForAsmLevel(asmLevel)));
+		ret.push_back(static_cast<unsigned char>(ncValue));
 		ret.push_back(static_cast<unsigned char>(asmSettingType));
 		ret.push_back(static_cast<unsigned char>(asmId));
 		ret.push_back(asmLevel);
@@ -226,4 +216,3 @@ namespace CommandSerializer
 	}
 
 }
-
