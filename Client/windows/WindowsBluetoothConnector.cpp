@@ -1,5 +1,7 @@
 #include "WindowsBluetoothConnector.h"
 
+#include <algorithm>
+
 void WSAStartupWrapper()
 {
 	int iResult;
@@ -50,8 +52,7 @@ void WindowsBluetoothConnector::connect(const std::string& addrStr)
 	}
 
 	// A failed connect() can leave the socket unusable - recreate it before trying the v2 UUID.
-	::closesocket(this->_socket);
-	this->_socket = INVALID_SOCKET;
+	this->_closeSocket();
 	this->_initSocket();
 
 	if (_tryConnect(SONY_UUID_V2, sab))
@@ -66,25 +67,57 @@ void WindowsBluetoothConnector::connect(const std::string& addrStr)
 
 WindowsBluetoothConnector::~WindowsBluetoothConnector()
 {
-	if (this->_socket != INVALID_SOCKET)
+	this->_closeSocket();
+}
+
+void WindowsBluetoothConnector::_closeSocket() noexcept
+{
+	SOCKET sock = this->_socket.exchange(INVALID_SOCKET);
+	if (sock != INVALID_SOCKET)
 	{
-		::closesocket(this->_socket);
+		::shutdown(sock, SD_BOTH);
+		::closesocket(sock);
 	}
 }
 
 int WindowsBluetoothConnector::send(char* buf, size_t length)
 {
-	auto bytesSent = ::send(this->_socket, buf, length, 0);
-	if (bytesSent == SOCKET_ERROR)
+	SOCKET sock = this->_socket.load();
+	if (sock == INVALID_SOCKET)
 	{
-		throw RecoverableException("Couldn't send (" + std::to_string(WSAGetLastError()) + ")", true);
+		throw RecoverableException("Not connected", true);
 	}
-	return bytesSent;
+
+	// send() is free to accept only part of the buffer; keep going until the whole frame is out,
+	// otherwise the device sees a truncated command and never answers.
+	size_t total = 0;
+	while (total < length)
+	{
+		int chunk = static_cast<int>((std::min)(length - total, static_cast<size_t>(0x7fffffff)));
+		int sent = ::send(sock, buf + total, chunk, 0);
+		if (sent == SOCKET_ERROR)
+		{
+			throw RecoverableException("Couldn't send (" + std::to_string(WSAGetLastError()) + ")", true);
+		}
+		total += static_cast<size_t>(sent);
+	}
+	return static_cast<int>(total);
 }
 
 int WindowsBluetoothConnector::recv(char* buf, size_t length)
 {
-	auto bytesReceived = ::recv(this->_socket, buf, length, 0);
+	SOCKET sock = this->_socket.load();
+	if (sock == INVALID_SOCKET)
+	{
+		throw RecoverableException("Not connected", true);
+	}
+
+	auto bytesReceived = ::recv(sock, buf, static_cast<int>(length), 0);
+	if (bytesReceived == 0)
+	{
+		// Graceful close by the headphones. Without this the caller loops on an empty buffer forever.
+		throw RecoverableException("The headphones closed the connection.", true);
+	}
 	if (bytesReceived == SOCKET_ERROR)
 	{
 		int err = WSAGetLastError();
@@ -142,13 +175,8 @@ std::vector<BluetoothDevice> WindowsBluetoothConnector::getConnectedDevices()
 
 void WindowsBluetoothConnector::disconnect() noexcept
 {
-	if (this->_socket != INVALID_SOCKET)
-	{
-		this->_connected = false;
-		shutdown(this->_socket, SD_BOTH);
-		closesocket(this->_socket);
-		this->_socket = INVALID_SOCKET;
-	}
+	this->_connected = false;
+	this->_closeSocket();
 }
 
 bool WindowsBluetoothConnector::isConnected() noexcept

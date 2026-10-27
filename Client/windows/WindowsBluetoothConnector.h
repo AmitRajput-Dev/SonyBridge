@@ -34,8 +34,11 @@ private:
 	std::string _wstringToUtf8(const std::wstring& wstr);
 	bool _tryConnect(const char* uuid, SOCKADDR_BTH& sab);
 
-	SOCKET _socket = INVALID_SOCKET;
-	std::atomic<bool> _connected = false;
-	SonyProtocolVersion _protocolVersion = SonyProtocolVersion::V1;
+	// disconnect() runs on the UI thread while a worker thread can be inside recv(), so the handle
+	// itself has to be atomic; closing it is what makes that blocked recv() return.
+	std::atomic<SOCKET> _socket{ INVALID_SOCKET };
+	std::atomic<bool> _connected{ false };
+	std::atomic<SonyProtocolVersion> _protocolVersion{ SonyProtocolVersion::V1 };
 	void _initSocket();
+	void _closeSocket() noexcept;
 };
