@@ -241,7 +241,26 @@ void CrossPlatformGUI::_pumpConnectionState()
 	if (!this->_pollFuture.valid() && ++this->_pollCounter >= DYNAMIC_POLL_FRAMES)
 	{
 		this->_pollCounter = 0;
-		this->_pollFuture.setFromAsync([this]() { this->_headphones.requestAmbientState(); });
+
+		// Battery is otherwise read once, in the post-connect phase, and never again: the header keeps
+		// showing the level from the moment you connected for as long as the app stays open. Refresh it
+		// on the same worker, on its own slower schedule.
+		bool withBattery = false;
+		this->_batteryPollCounter += DYNAMIC_POLL_FRAMES;
+		if (this->_isV2() && this->_batteryPollCounter >= BATTERY_POLL_FRAMES)
+		{
+			this->_batteryPollCounter = 0;
+			withBattery = true;
+		}
+
+		this->_pollFuture.setFromAsync([this, withBattery]() {
+			this->_headphones.requestAmbientState();
+			// Best effort: a device that doesn't answer the battery inquiry must not kill the poll.
+			if (withBattery)
+			{
+				try { this->_headphones.requestBattery(); } catch (const std::exception&) {}
+			}
+		});
 	}
 }
 
