@@ -5,6 +5,7 @@
 #include <utility>
 #include <string>
 #include <algorithm>
+#include <cctype>
 
 Headphones::Headphones(BluetoothWrapper& conn) : _conn(conn)
 {
@@ -77,12 +78,16 @@ int Headphones::getVptType()
 
 void Headphones::initDevice()
 {
-	// v2 devices expect an init handshake before they answer GET inquiries. Best-effort: the reply
-	// (INIT_REPLY, 8 bytes on v2) is ignored here - we only need the device to enter the ready state.
-	this->_conn.sendCommandAndReadResponse(
+	// v2 devices expect an init handshake before they answer GET inquiries. The reply (INIT_REPLY, 8 bytes
+	// on v2) also says whether the device has command table 2, which gates every multipoint read.
+	auto resp = this->_conn.sendCommandAndReadResponse(
 		{ (char)V2Command::INIT_REQUEST, 0x00 },
 		V2Command::INIT_REPLY
 	);
+	std::lock_guard guard(this->_propertyMtx);
+	this->_initReply = resp;
+	this->_table2Supported = resp.size() > V2Command::INIT_REPLY_TABLE2_INDEX
+		&& resp[V2Command::INIT_REPLY_TABLE2_INDEX] == 0x00;
 }
 
 void Headphones::requestBattery()
@@ -372,6 +377,287 @@ void Headphones::setAdaptiveVolume(bool enabled)
 	std::lock_guard guard(this->_propertyMtx);
 	this->_adaptiveVolume = enabled;
 }
+
+// --- Multipoint (read-only) ---
+
+namespace
+{
+	std::string hexString(const Buffer& bytes)
+	{
+		static const char digits[] = "0123456789abcdef";
+		std::string out;
+		for (size_t i = 0; i < bytes.size(); i++)
+		{
+			auto b = (unsigned char)bytes[i];
+			if (i > 0) out += ' ';
+			out += digits[b >> 4];
+			out += digits[b & 0x0f];
+		}
+		return out;
+	}
+
+	// 37 <type> <count> { <address, 17 ASCII> <slot> [<class of device, 3 bytes BE>] <name length> <name> } x count <playback slot>
+	// Returns false (and leaves `out` untouched) on any length mismatch, so a misread never reaches the UI.
+	bool parsePairedDevices(const Buffer& resp, bool withClassOfDevice, std::vector<PairedDevice>& out)
+	{
+		if (resp.size() < 4) return false;
+		size_t pos = 2;
+		size_t count = (unsigned char)resp[pos++];
+		std::vector<PairedDevice> devices;
+		for (size_t i = 0; i < count; i++)
+		{
+			size_t fixed = V2Table2Command::BT_ADDRESS_LENGTH + 1 + (withClassOfDevice ? 3 : 0) + 1;
+			if (pos + fixed > resp.size()) return false;
+			PairedDevice device;
+			device.address.assign(resp.begin() + pos, resp.begin() + pos + V2Table2Command::BT_ADDRESS_LENGTH);
+			pos += V2Table2Command::BT_ADDRESS_LENGTH;
+			device.slot = (unsigned char)resp[pos++];
+			if (withClassOfDevice)
+			{
+				device.classOfDevice = ((unsigned char)resp[pos] << 16) | ((unsigned char)resp[pos + 1] << 8) | (unsigned char)resp[pos + 2];
+				pos += 3;
+			}
+			size_t nameLength = (unsigned char)resp[pos++];
+			if (pos + nameLength > resp.size()) return false;
+			device.name.assign(resp.begin() + pos, resp.begin() + pos + nameLength);
+			pos += nameLength;
+			devices.push_back(device);
+		}
+		if (pos + 1 != resp.size()) return false;
+		// The trailing byte is the slot (1/2) that holds playback, not an index into the list.
+		int playbackSlot = (unsigned char)resp[pos];
+		for (auto& device : devices)
+		{
+			device.playback = device.slot != 0 && device.slot == playbackSlot;
+		}
+		out = devices;
+		return true;
+	}
+}
+
+void Headphones::requestMultipoint()
+{
+	if (this->_conn.getProtocolVersion() != SonyProtocolVersion::V2) return;
+
+	Buffer initReply;
+	bool table2Supported;
+	bool functionsRead;
+	std::vector<unsigned char> functions;
+	bool slotSearched;
+	int slot;
+	std::string discoveryLog;
+	{
+		std::lock_guard guard(this->_propertyMtx);
+		initReply = this->_initReply;
+		table2Supported = this->_table2Supported;
+		functionsRead = this->_table2FunctionsRead;
+		functions = this->_table2Functions;
+		slotSearched = this->_multipointSlotSearched;
+		slot = this->_multipointSlot;
+		discoveryLog = this->_multipointDiscoveryLog;
+	}
+
+	// One-time discovery reads (support functions, slot search) go to discoveryLog so a later refresh
+	// still shows them; per-refresh reads go to log.
+	std::string log;
+	std::string* target = &discoveryLog;
+	auto read = [&](const Buffer& cmd, unsigned char retCommandId, int retSubType, DATA_TYPE dataType) -> Buffer {
+		std::string label = dataType == DATA_TYPE::DATA_MDR_NO2 ? "T2 " : "T1 ";
+		try
+		{
+			auto resp = this->_conn.sendCommandAndReadResponse(cmd, retCommandId, retSubType, dataType);
+			*target += label + hexString(cmd) + " -> " + hexString(resp) + "\n";
+			return resp;
+		}
+		catch (const std::exception& exc)
+		{
+			*target += label + hexString(cmd) + " -> (" + exc.what() + ")\n";
+			return {};
+		}
+	};
+
+	bool hasPairedDevices = false; std::vector<PairedDevice> pairedDevices;
+	bool hasPinState = false; bool pinned = false;
+	if (!table2Supported)
+	{
+		log += "table 2 not advertised in the init reply; skipped the device list\n";
+	}
+	else
+	{
+		if (!functionsRead)
+		{
+			target = &discoveryLog;
+			// 07 00 <n> (<function> <priority>) x n
+			auto resp = read({ (char)V2Table2Command::SUPPORT_FUNCTION_GET, 0x00 },
+				V2Table2Command::SUPPORT_FUNCTION_RET, 0x00, DATA_TYPE::DATA_MDR_NO2);
+			if (resp.size() >= 3)
+			{
+				size_t count = (unsigned char)resp[2];
+				for (size_t i = 0; i < count && 3 + i * 2 < resp.size(); i++)
+				{
+					functions.push_back((unsigned char)resp[3 + i * 2]);
+				}
+				functionsRead = true;
+			}
+		}
+		target = &log;
+		auto supports = [&](unsigned char function) {
+			return std::find(functions.begin(), functions.end(), function) != functions.end();
+		};
+
+		bool withClassOfDevice = supports(V2Table2Command::FN_DEVICES_WITH_COD) || supports(V2Table2Command::FN_DEVICES_WITH_COD_LE);
+		if (withClassOfDevice || supports(V2Table2Command::FN_DEVICES_CLASSIC))
+		{
+			unsigned char type = withClassOfDevice ? V2Table2Command::PERI_DEVICES_WITH_COD : V2Table2Command::PERI_DEVICES_CLASSIC;
+			auto resp = read({ (char)V2Table2Command::PERI_GET_PARAM, (char)type },
+				V2Table2Command::PERI_RET_PARAM, type, DATA_TYPE::DATA_MDR_NO2);
+			hasPairedDevices = parsePairedDevices(resp, withClassOfDevice, pairedDevices);
+			if (!resp.empty() && !hasPairedDevices) log += "device list: unexpected layout\n";
+		}
+
+		if (supports(V2Table2Command::FN_SOURCE_SWITCH))
+		{
+			// 37 01 <value>: 1 = playback switches freely, 0 = playback device fixed.
+			auto resp = read({ (char)V2Table2Command::PERI_GET_PARAM, (char)V2Table2Command::PERI_SOURCE_SWITCH },
+				V2Table2Command::PERI_RET_PARAM, V2Table2Command::PERI_SOURCE_SWITCH, DATA_TYPE::DATA_MDR_NO2);
+			if (resp.size() >= 3)
+			{
+				hasPinState = true;
+				pinned = resp[2] == 0x00;
+			}
+		}
+	}
+
+	// The multipoint on/off switch is a table 1 general setting whose slot (D1..D4) differs per model:
+	// find it by name once per connection, then just read its value.
+	if (!slotSearched)
+	{
+		target = &discoveryLog;
+		for (int candidate = V2Command::GS_SLOT_FIRST; candidate <= V2Command::GS_SLOT_LAST; candidate++)
+		{
+			// d1 <slot> <type 00=boolean> <format> <name length> <name> <summary length> <summary>
+			auto resp = read({ (char)V2Command::GS_GET_CAPABILITY, (char)candidate, (char)V2Command::GS_DISPLAY_LANGUAGE_ENGLISH },
+				V2Command::GS_RET_CAPABILITY, candidate, DATA_TYPE::DATA_MDR);
+			if (resp.size() < 5 || resp[2] != 0x00) continue;
+			size_t nameLength = (unsigned char)resp[4];
+			if (5 + nameLength > resp.size()) continue;
+			if (std::string(resp.begin() + 5, resp.begin() + 5 + nameLength) == "MULTIPOINT_SETTING")
+			{
+				slot = candidate;
+				break;
+			}
+		}
+		slotSearched = true;
+	}
+	target = &log;
+
+	bool hasMultipointSetting = false; bool multipointEnabled = false;
+	if (slot > 0)
+	{
+		// d7 <slot> <type 00=boolean> <value 00=ON 01=OFF>
+		auto resp = read({ (char)V2Command::GS_GET_PARAM, (char)slot }, V2Command::GS_RET_PARAM, slot, DATA_TYPE::DATA_MDR);
+		if (resp.size() >= 4 && resp[2] == 0x00)
+		{
+			hasMultipointSetting = true;
+			multipointEnabled = resp[3] == 0x00;
+		}
+	}
+
+	std::lock_guard guard(this->_propertyMtx);
+	this->_table2FunctionsRead = functionsRead;
+	this->_table2Functions = functions;
+	this->_multipointSlotSearched = slotSearched;
+	this->_multipointSlot = slot;
+	this->_hasPairedDevices = hasPairedDevices;
+	this->_pairedDevices = pairedDevices;
+	this->_hasPlaybackPinState = hasPinState;
+	this->_playbackPinned = pinned;
+	this->_hasMultipointSetting = hasMultipointSetting;
+	this->_multipointEnabled = multipointEnabled;
+	this->_multipointDiscoveryLog = discoveryLog;
+	this->_multipointDiagnostics = "init " + (initReply.empty() ? std::string("(no reply)") : hexString(initReply)) + "\n"
+		+ discoveryLog + this->_multipointWriteLog + log;
+}
+
+int Headphones::switchPlaybackDevice(const std::string& address)
+{
+	std::string target;
+	{
+		std::lock_guard guard(this->_propertyMtx);
+		bool supported = this->_table2Supported && std::find(this->_table2Functions.begin(), this->_table2Functions.end(),
+			V2Table2Command::FN_SOURCE_SWITCH) != this->_table2Functions.end();
+		if (!supported) throw RecoverableException("This headset doesn't support switching the playback device.");
+		auto sameAddress = [&](const std::string& other) {
+			return other.size() == address.size() && std::equal(other.begin(), other.end(), address.begin(),
+				[](char a, char b) { return std::toupper((unsigned char)a) == std::toupper((unsigned char)b); });
+		};
+		for (const auto& device : this->_pairedDevices)
+		{
+			if (device.slot != 0 && sameAddress(device.address)) target = device.address;
+		}
+	}
+	if (target.size() != V2Table2Command::BT_ADDRESS_LENGTH)
+	{
+		throw RecoverableException("That device isn't connected to the headset.");
+	}
+
+	// SET: 3c 01 <address, exactly as the headset reported it>  ->  NTFY: 3d 01 <result> <address>
+	Buffer cmd = { (char)V2Table2Command::PERI_SET_EXTENDED_PARAM, (char)V2Table2Command::PERI_SOURCE_SWITCH };
+	cmd.insert(cmd.end(), target.begin(), target.end());
+	int result = V2Table2Command::RESULT_NO_CONFIRMATION;
+	std::string line = "W T2 " + hexString(cmd) + " -> ";
+	try
+	{
+		auto resp = this->_conn.sendCommandAndReadResponse(cmd, V2Table2Command::PERI_NTFY_EXTENDED_PARAM,
+			V2Table2Command::PERI_SOURCE_SWITCH, DATA_TYPE::DATA_MDR_NO2);
+		line += hexString(resp);
+		if (resp.size() >= 3) result = (unsigned char)resp[2];
+	}
+	catch (const std::exception& exc)
+	{
+		line += std::string("(") + exc.what() + ")";
+	}
+	std::lock_guard guard(this->_propertyMtx);
+	this->_multipointWriteLog += line + "\n";
+	return result;
+}
+
+int Headphones::setPlaybackPinned(bool pinned)
+{
+	{
+		std::lock_guard guard(this->_propertyMtx);
+		if (!this->_hasPlaybackPinState) throw RecoverableException("This headset doesn't support fixing the playback device.");
+	}
+
+	// SET: 38 01 <00=fixed, 01=free>  ->  NTFY: 39 01 <value> <result>
+	char value = pinned ? 0x00 : 0x01;
+	Buffer cmd = { (char)V2Table2Command::PERI_SET_PARAM, (char)V2Table2Command::PERI_SOURCE_SWITCH, value };
+	int result = V2Table2Command::RESULT_NO_CONFIRMATION;
+	std::string line = "W T2 " + hexString(cmd) + " -> ";
+	try
+	{
+		auto resp = this->_conn.sendCommandAndReadResponse(cmd, V2Table2Command::PERI_NTFY_PARAM,
+			V2Table2Command::PERI_SOURCE_SWITCH, DATA_TYPE::DATA_MDR_NO2);
+		line += hexString(resp);
+		if (resp.size() >= 4) result = (unsigned char)resp[3];
+		else if (resp.size() == 3) result = resp[2] == value ? V2Table2Command::RESULT_SUCCESS : V2Table2Command::RESULT_FAIL;
+	}
+	catch (const std::exception& exc)
+	{
+		line += std::string("(") + exc.what() + ")";
+	}
+	std::lock_guard guard(this->_propertyMtx);
+	this->_multipointWriteLog += line + "\n";
+	return result;
+}
+
+bool Headphones::hasPairedDevices() { std::lock_guard g(this->_propertyMtx); return this->_hasPairedDevices; }
+std::vector<PairedDevice> Headphones::getPairedDevices() { std::lock_guard g(this->_propertyMtx); return this->_pairedDevices; }
+bool Headphones::hasPlaybackPinState() { std::lock_guard g(this->_propertyMtx); return this->_hasPlaybackPinState; }
+bool Headphones::isPlaybackPinned() { std::lock_guard g(this->_propertyMtx); return this->_playbackPinned; }
+bool Headphones::hasMultipointSetting() { std::lock_guard g(this->_propertyMtx); return this->_hasMultipointSetting; }
+bool Headphones::getMultipointEnabled() { std::lock_guard g(this->_propertyMtx); return this->_multipointEnabled; }
+std::string Headphones::getMultipointDiagnostics() { std::lock_guard g(this->_propertyMtx); return this->_multipointDiagnostics; }
 
 bool Headphones::isChanged()
 {

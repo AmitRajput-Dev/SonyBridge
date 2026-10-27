@@ -5,6 +5,7 @@
 
 import SwiftUI
 import AppKit
+import Combine
 
 private enum Theme {
     static let bg = Color(red: 0.07, green: 0.07, blue: 0.086)
@@ -16,7 +17,7 @@ private enum Theme {
 
 @available(macOS 11.0, *)
 struct ContentView: View {
-    @StateObject private var model = HeadphonesModel()
+    @StateObject private var model = HeadphonesModel.shared
     @State private var showAbout = false
 
     var body: some View {
@@ -74,6 +75,9 @@ struct ContentView: View {
                 ambientCard
                 if model.mode == .ambientSound {
                     ambientLevelCard
+                }
+                if model.multipointLoading || !model.multipointDiagnostics.isEmpty {
+                    devicesCard
                 }
                 if model.supportsEqualizer {
                     equalizerCard
@@ -387,6 +391,180 @@ struct ContentView: View {
         .toggleStyle(SwitchToggleStyle(tint: Theme.accent))
     }
 
+    // Multipoint device list. Read-only for now: nothing here sends a command that changes the headset.
+    private var devicesCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("Devices")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(.white)
+                Spacer()
+                if model.multipointLoading || model.refreshingMultipoint || model.multipointBusy {
+                    ProgressView()
+                        .scaleEffect(0.5)
+                        .frame(width: 16, height: 16)
+                } else {
+                    Button(action: model.refreshMultipoint) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(Theme.secondary)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+            }
+            if model.multipointLoading {
+                HStack(spacing: 10) {
+                    ProgressView()
+                        .scaleEffect(0.6)
+                        .frame(width: 18, height: 18)
+                    Text("Reading devices from the headset…")
+                        .font(.system(size: 12))
+                        .foregroundColor(Theme.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 6)
+            }
+            if model.hasMultipointSetting {
+                devicesInfoRow("Connect to 2 devices", model.multipointEnabled ? "On" : "Off")
+            }
+            if model.hasPlaybackPinState {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Playback device").font(.system(size: 13, weight: .medium)).foregroundColor(.white)
+                        Text(model.playbackPinned ? "Fixed" : "Switches automatically")
+                            .font(.system(size: 11)).foregroundColor(Theme.secondary)
+                    }
+                    Spacer()
+                    Button(action: { model.setPlaybackPinned(!model.playbackPinned) }) {
+                        Text(model.playbackPinned ? "Unfix" : "Fix")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 5)
+                            .background(Theme.cardHi)
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    .disabled(model.multipointBusy)
+                }
+            }
+            if model.hasPairedDevices {
+                let connected = model.pairedDevices.filter { $0.connected }.sorted { $0.slot < $1.slot }
+                let paired = model.pairedDevices.filter { !$0.connected }
+                if !connected.isEmpty {
+                    devicesSectionLabel("Connected")
+                    ForEach(connected) { deviceRow($0) }
+                }
+                if !paired.isEmpty {
+                    devicesSectionLabel("Paired")
+                    ForEach(paired) { deviceRow($0) }
+                }
+            } else if !model.multipointLoading {
+                Text("This headset didn't return a device list.")
+                    .font(.system(size: 12))
+                    .foregroundColor(Theme.secondary)
+            }
+            if !model.multipointLoading {
+                devicesFooter
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.card)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private var devicesFooter: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Divider().background(Theme.cardHi)
+            HStack {
+                Text(model.multipointBusy ? "Sending…" : "Switching and fixing are experimental")
+                    .font(.system(size: 11))
+                    .foregroundColor(Theme.secondary.opacity(0.7))
+                Spacer()
+                Button(action: copyMultipointDiagnostics) {
+                    Text("Copy diagnostics")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(Theme.accent)
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+        }
+    }
+
+    private func devicesInfoRow(_ label: String, _ value: String) -> some View {
+        HStack {
+            Text(label).font(.system(size: 13, weight: .medium)).foregroundColor(.white)
+            Spacer()
+            Text(value).font(.system(size: 12)).foregroundColor(Theme.secondary)
+        }
+    }
+
+    private func devicesSectionLabel(_ text: String) -> some View {
+        Text(text.uppercased())
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundColor(Theme.secondary.opacity(0.8))
+            .padding(.top, 2)
+    }
+
+    private func deviceRow(_ device: PairedDeviceInfo) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: deviceSymbol(device.classOfDevice))
+                .font(.system(size: 15))
+                .foregroundColor(device.connected ? .white : Theme.secondary)
+                .frame(width: 22)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(device.name.isEmpty ? device.address : device.name)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(device.connected ? .white : Theme.secondary)
+                    .lineLimit(1)
+                if device.isThisMac {
+                    Text("This Mac").font(.system(size: 11)).foregroundColor(Theme.accent)
+                }
+            }
+            Spacer()
+            if device.playback {
+                if model.playbackPinned {
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 11))
+                        .foregroundColor(Theme.accent)
+                }
+                Image(systemName: "speaker.wave.2.fill")
+                    .font(.system(size: 12))
+                    .foregroundColor(Theme.accent)
+            }
+            if device.connected && model.hasPlaybackPinState {
+                Menu {
+                    Button("Switch playback device and fix") { model.switchPlayback(to: device, fix: true) }
+                    if !device.playback {
+                        Button("Switch playback device") { model.switchPlayback(to: device, fix: false) }
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                }
+                .menuStyle(BorderlessButtonMenuStyle())
+                .fixedSize()
+                .disabled(model.multipointBusy)
+            }
+        }
+    }
+
+    // Major device class lives in bits 8-12 of the class of device (1 = computer, 2 = phone).
+    private func deviceSymbol(_ classOfDevice: Int) -> String {
+        guard classOfDevice >= 0, classOfDevice != 0xFFFFFF else { return "dot.radiowaves.left.and.right" }
+        switch (classOfDevice >> 8) & 0x1F {
+        case 1: return "laptopcomputer"
+        case 2: return "iphone"
+        default: return "dot.radiowaves.left.and.right"
+        }
+    }
+
+    private func copyMultipointDiagnostics() {
+        let header = "\(model.deviceName) · fw \(model.firmware) · \(model.protocolVersion)\n"
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(header + model.multipointDiagnostics, forType: .string)
+    }
+
     // ⋯ About / device info popover.
     private var aboutView: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -436,6 +614,173 @@ struct ContentView: View {
         case ...50: return "battery.25"
         default: return "battery.100"
         }
+    }
+}
+
+// MARK: - Menu bar
+
+// Status-bar item for pinning playback to this Mac without opening the window. Installed once from
+// AppDelegate; reads and drives the same HeadphonesModel as the window. The icon shows the playback device
+// next to the headphones (phone, computer, or its multipoint slot number), and the headphones fill in
+// while playback is fixed to this Mac.
+@objc final class MenuBarController: NSObject, NSMenuDelegate {
+    private static var instance: MenuBarController?
+
+    private let model = HeadphonesModel.shared
+    private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    private var cancellables = Set<AnyCancellable>()
+
+    @objc static func install() {
+        guard instance == nil else { return }
+        instance = MenuBarController()
+    }
+
+    private override init() {
+        super.init()
+        let menu = NSMenu()
+        menu.delegate = self
+        menu.autoenablesItems = false
+        statusItem.menu = menu
+        updateIcon()
+        // objectWillChange fires before the new values land, so read them on the next main-loop turn.
+        model.objectWillChange
+            .sink { [weak self] _ in DispatchQueue.main.async { self?.updateIcon() } }
+            .store(in: &cancellables)
+    }
+
+    private var thisMac: PairedDeviceInfo? {
+        model.pairedDevices.first { $0.isThisMac && $0.connected }
+    }
+
+    private var pinnedToThisMac: Bool {
+        model.playbackPinned && thisMac?.playback == true
+    }
+
+    private var playbackDevice: PairedDeviceInfo? {
+        model.connected ? model.pairedDevices.first { $0.playback } : nil
+    }
+
+    // Phone if the name says so, computer for this Mac (or another Mac), otherwise the slot number.
+    private func playbackSymbol(for device: PairedDeviceInfo) -> String {
+        let name = device.name.lowercased()
+        if name.contains("phone") { return "iphone" }
+        if device.isThisMac || name.contains("mac") { return "laptopcomputer" }
+        return "\(device.slot).circle"
+    }
+
+    private func updateIcon() {
+        let base = pinnedToThisMac ? "headphones.circle.fill" : "headphones"
+        let device = playbackDevice
+        statusItem.button?.image = Self.icon(base: base, accessory: device.map(playbackSymbol(for:)))
+        statusItem.button?.appearsDisabled = !model.connected
+        if let device = device {
+            let name = device.name.isEmpty ? device.address : device.name
+            statusItem.button?.toolTip = "Playing on \(name)" + (model.playbackPinned ? " (fixed)" : "")
+        } else {
+            statusItem.button?.toolTip = model.connected ? model.deviceName : "SonyBridge"
+        }
+    }
+
+    // Draws the headphones symbol with an optional second symbol beside it, as one template image.
+    private static func icon(base: String, accessory: String?) -> NSImage? {
+        let baseConfig = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
+        let accessoryConfig = NSImage.SymbolConfiguration(pointSize: 11, weight: .regular)
+        guard let baseImage = NSImage(systemSymbolName: base, accessibilityDescription: "SonyBridge")?
+            .withSymbolConfiguration(baseConfig) else { return nil }
+        guard let accessory = accessory,
+              let accessoryImage = NSImage(systemSymbolName: accessory, accessibilityDescription: nil)?
+                .withSymbolConfiguration(accessoryConfig) else {
+            baseImage.isTemplate = true
+            return baseImage
+        }
+        let spacing: CGFloat = 2
+        let size = NSSize(width: baseImage.size.width + spacing + accessoryImage.size.width,
+                          height: max(baseImage.size.height, accessoryImage.size.height))
+        let image = NSImage(size: size, flipped: false) { _ in
+            baseImage.draw(in: NSRect(x: 0, y: (size.height - baseImage.size.height) / 2,
+                                      width: baseImage.size.width, height: baseImage.size.height))
+            accessoryImage.draw(in: NSRect(x: baseImage.size.width + spacing, y: (size.height - accessoryImage.size.height) / 2,
+                                           width: accessoryImage.size.width, height: accessoryImage.size.height))
+            return true
+        }
+        image.isTemplate = true
+        image.accessibilityDescription = "SonyBridge"
+        return image
+    }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        if model.connected {
+            menu.addItem(disabledItem(model.deviceName))
+            if model.hasPlaybackPinState {
+                if thisMac != nil {
+                    let pin = actionItem(pinnedToThisMac ? "Playback Fixed to This Mac" : "Pin Playback to This Mac",
+                                         #selector(pinToThisMac))
+                    pin.state = pinnedToThisMac ? .on : .off
+                    pin.isEnabled = !pinnedToThisMac && !model.multipointBusy
+                    menu.addItem(pin)
+                } else {
+                    menu.addItem(disabledItem("This Mac isn't a connected device"))
+                }
+                if model.playbackPinned {
+                    let unfix = actionItem("Unfix Playback", #selector(unfixPlayback))
+                    unfix.isEnabled = !model.multipointBusy
+                    menu.addItem(unfix)
+                }
+            }
+            if model.multipointBusy {
+                menu.addItem(disabledItem("Sending…"))
+            } else if let error = model.errorMessage {
+                menu.addItem(disabledItem(error))
+            }
+            // Re-read so the next open reflects changes made from the phone or the headset.
+            if !model.multipointBusy && !model.refreshingMultipoint {
+                model.refreshMultipoint()
+            }
+        } else {
+            menu.addItem(disabledItem("No headphones connected"))
+            let connect = actionItem(model.connecting ? "Connecting…" : "Connect Headphones", #selector(connectHeadphones))
+            connect.isEnabled = !model.connecting
+            menu.addItem(connect)
+        }
+        menu.addItem(.separator())
+        menu.addItem(actionItem("Open SonyBridge", #selector(openWindow)))
+        menu.addItem(actionItem("Quit SonyBridge", #selector(quit), key: "q"))
+    }
+
+    @objc private func pinToThisMac() {
+        guard let thisMac = thisMac else { return }
+        model.switchPlayback(to: thisMac, fix: true)
+    }
+
+    @objc private func unfixPlayback() {
+        model.setPlaybackPinned(false)
+    }
+
+    @objc private func connectHeadphones() {
+        NSApp.activate(ignoringOtherApps: true)
+        model.connect()
+    }
+
+    @objc private func openWindow() {
+        NSApp.activate(ignoringOtherApps: true)
+        NSApp.windows.first { $0.contentViewController != nil }?.makeKeyAndOrderFront(nil)
+    }
+
+    @objc private func quit() {
+        NSApp.terminate(nil)
+    }
+
+    private func actionItem(_ title: String, _ action: Selector, key: String = "") -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
+        item.target = self
+        return item
+    }
+
+    private func disabledItem(_ title: String) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        item.isEnabled = false
+        return item
     }
 }
 

@@ -24,10 +24,10 @@ BluetoothWrapper& BluetoothWrapper::operator=(BluetoothWrapper&& other) noexcept
 	return *this;
 }
 
-int BluetoothWrapper::sendCommand(const std::vector<char>& bytes)
+int BluetoothWrapper::sendCommand(const std::vector<char>& bytes, DATA_TYPE dataType)
 {
 	std::lock_guard guard(this->_connectorMtx);
-	auto data = CommandSerializer::packageDataForBt(bytes, DATA_TYPE::DATA_MDR, this->_seqNumber++);
+	auto data = CommandSerializer::packageDataForBt(bytes, dataType, this->_seqNumber++);
 	auto bytesSent = this->_connector->send(data.data(), data.size());
 
 	this->_waitForAck();
@@ -76,10 +76,11 @@ SonyProtocolVersion BluetoothWrapper::getProtocolVersion() noexcept
 	return this->_connector->getProtocolVersion();
 }
 
-Buffer BluetoothWrapper::sendCommandAndReadResponse(const std::vector<char>& bytes, unsigned char retCommandId, int retSubType)
+Buffer BluetoothWrapper::sendCommandAndReadResponse(const std::vector<char>& bytes, unsigned char retCommandId, int retSubType,
+	DATA_TYPE dataType)
 {
 	std::lock_guard guard(this->_connectorMtx);
-	auto data = CommandSerializer::packageDataForBt(bytes, DATA_TYPE::DATA_MDR, this->_seqNumber++);
+	auto data = CommandSerializer::packageDataForBt(bytes, dataType, this->_seqNumber++);
 	this->_connector->send(data.data(), data.size());
 
 	// The device replies with an ACK and then the RET frame; unrelated notifications may interleave.
@@ -91,7 +92,7 @@ Buffer BluetoothWrapper::sendCommandAndReadResponse(const std::vector<char>& byt
 			this->_seqNumber = msg.seqNumber;
 			continue;
 		}
-		if (msg.dataType == DATA_TYPE::DATA_MDR && !msg.payload.empty()
+		if (msg.dataType == dataType && !msg.payload.empty()
 			&& (unsigned char)msg.payload[0] == retCommandId
 			&& (retSubType < 0 || (msg.payload.size() >= 2 && (unsigned char)msg.payload[1] == retSubType)))
 		{
@@ -167,9 +168,10 @@ CommandSerializer::Message BluetoothWrapper::_readMessage()
 
 	auto msg = CommandSerializer::unpackBtMessage(msgBytes);
 
-	// The device retransmits any DATA_MDR frame it sends until the host ACKs it. The ack carries the
-	// toggled 1-bit sequence number (1 - deviceSeq), matching the device's own ack-to-us behaviour.
-	if (msg.dataType == DATA_TYPE::DATA_MDR)
+	// The device retransmits any DATA_MDR / DATA_MDR_NO2 frame it sends until the host ACKs it. The ack
+	// carries the toggled 1-bit sequence number (1 - deviceSeq), matching the device's own ack-to-us behaviour.
+	// Both tables share the one sequence counter.
+	if (msg.dataType == DATA_TYPE::DATA_MDR || msg.dataType == DATA_TYPE::DATA_MDR_NO2)
 	{
 		auto ack = CommandSerializer::packageDataForBt({}, DATA_TYPE::ACK, (unsigned char)(1 - msg.seqNumber));
 		this->_connector->send(ack.data(), ack.size());

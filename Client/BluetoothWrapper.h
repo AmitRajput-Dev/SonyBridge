@@ -21,12 +21,15 @@ public:
 	BluetoothWrapper(BluetoothWrapper&& other) noexcept;
 	BluetoothWrapper& operator=(BluetoothWrapper&& other) noexcept;
 
-	int sendCommand(const std::vector<char>& bytes);
+	// dataType selects the command table: DATA_MDR (0x0c, table 1) or DATA_MDR_NO2 (0x0e, table 2).
+	// The two tables are separate command spaces - the same opcode means different things in each.
+	int sendCommand(const std::vector<char>& bytes, DATA_TYPE dataType = DATA_TYPE::DATA_MDR);
 
-	// Sends an inquiry command and returns the payload of the first DATA_MDR response whose command id
-	// (payload[0]) matches retCommandId, skipping the ACK and any unrelated notifications. When retSubType
-	// is >= 0, payload[1] must also match it (for multiplexed command families that share one opcode).
-	Buffer sendCommandAndReadResponse(const std::vector<char>& bytes, unsigned char retCommandId, int retSubType = -1);
+	// Sends an inquiry command and returns the payload of the first response of the same dataType whose
+	// command id (payload[0]) matches retCommandId, skipping the ACK and any unrelated notifications. When
+	// retSubType is >= 0, payload[1] must also match it (for multiplexed command families that share one opcode).
+	Buffer sendCommandAndReadResponse(const std::vector<char>& bytes, unsigned char retCommandId, int retSubType = -1,
+		DATA_TYPE dataType = DATA_TYPE::DATA_MDR);
 
 	bool isConnected() noexcept;
 	//Try to connect to the headphones

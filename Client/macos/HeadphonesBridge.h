@@ -14,6 +14,16 @@ typedef NS_ENUM(NSInteger, SHCAmbientMode) {
     SHCAmbientModeAmbientSound = 2,
 };
 
+// One entry of the headset's paired-device list (multipoint).
+@interface SHCPairedDevice : NSObject
+@property (nonatomic, copy, readonly) NSString *name;
+@property (nonatomic, copy, readonly) NSString *address;      // "XX:XX:XX:XX:XX:XX"
+@property (nonatomic, readonly) NSInteger slot;               // 0 = paired only, 1/2 = connected
+@property (nonatomic, readonly) NSInteger classOfDevice;      // 24-bit Bluetooth CoD, -1 if not reported
+@property (nonatomic, readonly) BOOL playback;                // holds the playback right
+@property (nonatomic, readonly) BOOL isThisMac;
+@end
+
 @interface HeadphonesBridge : NSObject
 
 @property (nonatomic, readonly) BOOL connected;
@@ -54,6 +64,15 @@ typedef NS_ENUM(NSInteger, SHCAmbientMode) {
 @property (nonatomic, readonly) BOOL hasAdaptiveVolume;
 @property (nonatomic, readonly) BOOL adaptiveVolume;
 
+// Multipoint (read-only; v2 devices that answered the reads on connect or on refreshMultipoint).
+@property (nonatomic, readonly) BOOL hasPairedDevices;
+@property (nonatomic, copy, readonly) NSArray<SHCPairedDevice *> *pairedDevices;
+@property (nonatomic, readonly) BOOL hasPlaybackPinState;
+@property (nonatomic, readonly) BOOL playbackPinned;
+@property (nonatomic, readonly) BOOL hasMultipointSetting;
+@property (nonatomic, readonly) BOOL multipointEnabled;
+@property (nonatomic, copy, readonly) NSString *multipointDiagnostics; // hex log of the last multipoint reads
+
 // Runs the native Bluetooth device picker (modal, main thread) and connects to the chosen device.
 // completion is called on the main thread.
 - (void)scanAndConnectWithCompletion:(void (^)(BOOL ok, NSString * _Nullable error))completion;
@@ -88,6 +107,18 @@ typedef NS_ENUM(NSInteger, SHCAmbientMode) {
 // Re-reads the fast-changing state (ambient/NC, level, EQ, DSEE) so changes made with the headphone's
 // own button show up in the app. Called on a timer while connected.
 - (void)refreshDynamicWithCompletion:(void (^)(void))completion;
+
+// Re-reads the paired-device list, pinned state and multipoint switch (GETs only); completion on main.
+- (void)refreshMultipointWithCompletion:(void (^)(void))completion;
+
+// Moves playback to a connected device (address from pairedDevices). With fix=YES it is Sound Connect's
+// "Switch playback device and fix": unfix if fixed, switch (skipped if it already plays), then fix -
+// stopping at the first refused step. With fix=NO it switches, then unfixes if playback was fixed, so it
+// ends switching freely. State is re-read from the headset afterwards; completion on main.
+- (void)switchPlaybackToAddress:(NSString *)address fix:(BOOL)fix completion:(void (^)(BOOL ok, NSString * _Nullable error))completion;
+
+// Fixes (pins) or frees the current playback device; one write, then a re-read. Completion on main.
+- (void)setPlaybackPinned:(BOOL)pinned completion:(void (^)(BOOL ok, NSString * _Nullable error))completion;
 
 @end
 

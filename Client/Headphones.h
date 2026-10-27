@@ -3,6 +3,18 @@
 #include "Constants.h"
 
 #include <mutex>
+#include <string>
+#include <vector>
+
+// One entry of the headset's paired-device list (multipoint, v2 table 2).
+struct PairedDevice
+{
+	std::string address;    // "XX:XX:XX:XX:XX:XX", as the headset reports it
+	std::string name;       // may be empty
+	int slot = 0;           // multipoint slot: 0 = paired but not connected, 1/2 = connected
+	int classOfDevice = -1; // 24-bit Bluetooth class of device; -1 if not reported, 0xFFFFFF for paired-only
+	bool playback = false;  // currently holds the playback (A2DP) right
+};
 
 template <class T>
 struct Property {
@@ -86,6 +98,26 @@ public:
 	bool getAdaptiveVolume();
 	void setAdaptiveVolume(bool enabled);
 
+	// Multipoint (v2, read-only). Only GETs are sent, and the table 2 reads only when initDevice()'s reply
+	// says the device has command table 2. Each piece is exposed only if the device answered it.
+	void requestMultipoint();
+	bool hasPairedDevices();
+	std::vector<PairedDevice> getPairedDevices();
+	bool hasPlaybackPinState();
+	bool isPlaybackPinned();
+	bool hasMultipointSetting();
+	bool getMultipointEnabled();
+	// Hex log of the init reply and every multipoint request/reply from the last requestMultipoint(),
+	// for bringing the protocol up on models nobody has captured yet.
+	std::string getMultipointDiagnostics();
+
+	// Multipoint writes. Each sends exactly one command and returns a V2Table2Command::RESULT_* code. They
+	// throw RecoverableException (without sending) unless requestMultipoint() saw the device advertise
+	// source-switch control. Call requestMultipoint() afterwards to read back the real state.
+	// switchPlaybackDevice: the address must be a connected device from the last device list.
+	int switchPlaybackDevice(const std::string& address);
+	int setPlaybackPinned(bool pinned);
+
 	bool isChanged();
 	void setChanges();
 private:
@@ -111,6 +143,17 @@ private:
 	bool _hasCodec = false; std::string _codec;
 	bool _hasSpeakToChat = false; bool _speakToChat = false;
 	bool _hasAdaptiveVolume = false; bool _adaptiveVolume = false;
+
+	Buffer _initReply;
+	bool _table2Supported = false;
+	bool _table2FunctionsRead = false; std::vector<unsigned char> _table2Functions;
+	bool _hasPairedDevices = false; std::vector<PairedDevice> _pairedDevices;
+	bool _hasPlaybackPinState = false; bool _playbackPinned = false;
+	bool _multipointSlotSearched = false; int _multipointSlot = -1;
+	bool _hasMultipointSetting = false; bool _multipointEnabled = false;
+	std::string _multipointDiscoveryLog;
+	std::string _multipointWriteLog;
+	std::string _multipointDiagnostics;
 
 	std::mutex _propertyMtx;
 
