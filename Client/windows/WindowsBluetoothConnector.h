@@ -1,17 +1,25 @@
 #pragma once
-#include <stdio.h>
-#pragma comment(lib, "ws2_32.lib")
-#pragma comment(lib, "rpcrt4.lib")
-#pragma comment(lib, "Bthprops.lib")
+
+// winsock2.h must precede windows.h, which bluetoothapis.h pulls in.
 #include <winsock2.h>
 #include <ws2bth.h>
-#include <BluetoothAPIs.h>
-#include <iostream>
+// Lowercase: the MinGW-w64 headers are named this way, and so is the file on a
+// case-sensitive filesystem (cross-compiling from Linux).
+#include <bluetoothapis.h>
 #include <rpc.h>
-#include "IBluetoothConnector.h"
-#include <string>
-#include "ByteMagic.h"
+
 #include <atomic>
+#include <string>
+
+#include "IBluetoothConnector.h"
+#include "ByteMagic.h"
+
+// Only MSVC understands these; every other toolchain gets the libraries from CMake.
+#ifdef _MSC_VER
+#pragma comment(lib, "ws2_32.lib")
+#pragma comment(lib, "rpcrt4.lib")
+#pragma comment(lib, "bthprops.lib")
+#endif
 
 class WindowsBluetoothConnector final : public IBluetoothConnector
 {

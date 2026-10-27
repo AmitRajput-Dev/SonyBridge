@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <iostream>
 #include <memory>
 #include "WindowsBluetoothConnector.h"
 #include "CommandSerializer.h"

@@ -18,7 +18,7 @@
 
 #include <string>
 
-#include "Windows.h"
+#include <windows.h>
 
 #include "CrossPlatformGUI.h"
 
