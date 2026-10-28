@@ -176,10 +176,11 @@ struct HeroBackdrop: View {
                 Circle()
                     .fill(RadialGradient(colors: [palette.glow.opacity(0), palette.glow],
                                          center: .center, startRadius: 40, endRadius: 105))
+                // Outermost ring is the frame itself, so none reach the button row or the device name.
                 ForEach(0..<3) { ring in
                     Circle()
-                        .strokeBorder(palette.accent.opacity(0.3 - Double(ring) * 0.1), lineWidth: 1)
-                        .frame(width: 222 + CGFloat(ring) * 36, height: 222 + CGFloat(ring) * 36)
+                        .strokeBorder(palette.accent.opacity(0.3 - Double(ring) * 0.08), lineWidth: 1)
+                        .frame(width: 210 - CGFloat(ring) * 24, height: 210 - CGFloat(ring) * 24)
                 }
             } else {
                 Circle()

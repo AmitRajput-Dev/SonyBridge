@@ -209,10 +209,22 @@ struct ContentView: View {
     }
 
     // Selected/idle look shared by the mode control and the EQ presets: pills in Sony Signature,
-    // rounded segments otherwise. The content shape keeps clear (idle) segments clickable.
+    // rounded segments otherwise. Pills must be a real Capsule: a continuous RoundedRectangle with a
+    // radius near half the height has no room for its corner curves and renders flat-sided ends.
+    @ViewBuilder
     private func selectable<Label: View>(_ label: Label, selected: Bool, idleFill: Color) -> some View {
-        let shape = RoundedRectangle(cornerRadius: theme.isSignature ? 15 : 8, style: .continuous)
-        return label
+        if theme.isSignature {
+            selectionChrome(label, in: Capsule(), selected: selected, idleFill: idleFill)
+        } else {
+            selectionChrome(label, in: RoundedRectangle(cornerRadius: 8, style: .continuous),
+                            selected: selected, idleFill: idleFill)
+        }
+    }
+
+    // The content shape keeps clear (idle) segments clickable.
+    private func selectionChrome<Label: View, S: InsettableShape>(_ label: Label, in shape: S,
+                                                                  selected: Bool, idleFill: Color) -> some View {
+        label
             .foregroundColor(selected ? palette.selectedText : palette.secondary)
             .background(selected ? palette.selectedFill : idleFill, in: shape)
             .overlay(shape.strokeBorder(selected ? palette.selectedStroke
@@ -241,9 +253,10 @@ struct ContentView: View {
         return Button(action: { model.setMode(mode) }) {
             selectable(
                 Text(modeName(mode))
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 11.5, weight: .semibold))
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
+                    .padding(.horizontal, 8)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 8),
                 selected: selected, idleFill: .clear
@@ -275,7 +288,7 @@ struct ContentView: View {
             .accentColor(palette.accent)
 
             if model.focusOnVoiceAvailable {
-                Toggle(isOn: Binding(
+                switchRow("Focus on Voice", isOn: Binding(
                     get: { model.focusOnVoice },
                     set: { model.setFocusOnVoice($0) }
                 )) {
@@ -283,7 +296,6 @@ struct ContentView: View {
                         .font(.system(size: 13, weight: .medium))
                         .foregroundColor(palette.primary)
                 }
-                .toggleStyle(SwitchToggleStyle(tint: palette.accent))
             }
         }
         .themedCard()
@@ -346,13 +358,12 @@ struct ContentView: View {
     }
 
     private var dseeCard: some View {
-        Toggle(isOn: Binding(get: { model.dsee }, set: { model.setDsee($0) })) {
+        switchRow("DSEE", isOn: Binding(get: { model.dsee }, set: { model.setDsee($0) })) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("DSEE").font(.system(size: 14, weight: .semibold)).foregroundColor(palette.primary)
                 Text("Upscale compressed audio").font(.system(size: 11)).foregroundColor(palette.secondary)
             }
         }
-        .toggleStyle(SwitchToggleStyle(tint: palette.accent))
         .themedCard()
     }
 
@@ -382,12 +393,11 @@ struct ContentView: View {
             if model.hasSpeakToChat {
                 settingToggle("Speak-to-Chat", "Pause music when you talk",
                               on: model.speakToChat) { model.setSpeakToChat($0) }
-                Toggle(isOn: $model.keepSpeakToChatOff) {
+                switchRow("Keep off on connect", isOn: $model.keepSpeakToChatOff) {
                     Text("Keep off on connect")
                         .font(.system(size: 11))
                         .foregroundColor(palette.secondary)
                 }
-                .toggleStyle(SwitchToggleStyle(tint: palette.accent))
                 .controlSize(.small)
                 .padding(.leading, 12)
             }
@@ -418,13 +428,25 @@ struct ContentView: View {
     }
 
     private func settingToggle(_ title: String, _ subtitle: String, on: Bool, action: @escaping (Bool) -> Void) -> some View {
-        Toggle(isOn: Binding(get: { on }, set: { action($0) })) {
+        switchRow(title, isOn: Binding(get: { on }, set: { action($0) })) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.system(size: 14, weight: .semibold)).foregroundColor(palette.primary)
                 Text(subtitle).font(.system(size: 11)).foregroundColor(palette.secondary)
             }
         }
-        .toggleStyle(SwitchToggleStyle(tint: palette.accent))
+    }
+
+    // Label on the left, switch on the trailing edge, so every switch in the window lines up.
+    // The title stays on the hidden Toggle label for VoiceOver.
+    private func switchRow<Label: View>(_ title: String, isOn: Binding<Bool>,
+                                        @ViewBuilder label: () -> Label) -> some View {
+        HStack {
+            label()
+            Spacer()
+            Toggle(title, isOn: isOn)
+                .labelsHidden()
+                .toggleStyle(SwitchToggleStyle(tint: palette.accent))
+        }
     }
 
     // Multipoint device list. Read-only for now: nothing here sends a command that changes the headset.
