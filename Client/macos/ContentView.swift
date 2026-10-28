@@ -5,12 +5,11 @@
 
 import SwiftUI
 import AppKit
-import Combine
 
 struct ContentView: View {
     @StateObject private var model = HeadphonesModel.shared
     @State private var showAbout = false
-    @AppStorage("appTheme") private var theme = AppTheme.refinedDark
+    @AppStorage(AppTheme.storageKey) private var theme = AppTheme.refinedDark
     @Environment(\.colorScheme) private var colorScheme
 
     private var palette: Palette { theme.palette(colorScheme) }
@@ -26,14 +25,8 @@ struct ContentView: View {
         .frame(minWidth: 360, minHeight: 500)
         .background(palette.background)
         .environment(\.appTheme, theme)
-        .onAppear { applyAppearance(theme) }
-        .onChange(of: theme, perform: applyAppearance)
-    }
-
-    // Not .preferredColorScheme: on macOS, once it has forced a window dark, setting it back to nil
-    // doesn't return the window to the system appearance, so Native Glass would stay dark until relaunch.
-    private func applyAppearance(_ theme: AppTheme) {
-        NSApp.appearance = theme.colorScheme == .dark ? NSAppearance(named: .darkAqua) : nil
+        .onAppear { theme.applyToApp() }
+        .onChange(of: theme) { $0.applyToApp() }
     }
 
     // MARK: - Disconnected
@@ -54,51 +47,70 @@ struct ContentView: View {
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 32)
             }
-            Button(action: model.connect) {
-                Text(model.connecting ? "Connecting…" : "Connect headphones")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(palette.onAccent)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .background(palette.accent)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            }
-            .buttonStyle(PlainButtonStyle())
-            .disabled(model.connecting)
-            .padding(.horizontal, 40)
+            ConnectButton(model: model)
+                .padding(.horizontal, 40)
             Spacer()
         }
     }
 
     // MARK: - Connected
 
+    // Two independently scrolling columns once the window is wide enough, otherwise one. The pair is capped
+    // and centered so cards don't stretch on a very wide window.
     private var connectedView: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(spacing: 16) {
-                deviceHero
-                ambientCard
-                if model.mode == .ambientSound {
-                    ambientLevelCard
+        GeometryReader { proxy in
+            if proxy.size.width >= 720 {
+                HStack(alignment: .top, spacing: 0) {
+                    column { primaryCards }
+                        .frame(width: 380)
+                    column(padding: [.vertical, .trailing]) { secondaryCards }
+                        .frame(maxWidth: 580)
                 }
-                if model.multipointLoading || model.hasPairedDevices || model.hasPlaybackPinState {
-                    devicesCard
-                }
-                if model.supportsEqualizer {
-                    equalizerCard
-                }
-                if model.supportsDsee {
-                    dseeCard
-                }
-                if model.hasAdaptiveVolume || model.hasSpeakToChat || model.hasAutoPowerOff || model.hasMultipointSetting {
-                    settingsCard
-                }
-                if let error = model.errorMessage {
-                    Text(error)
-                        .font(.system(size: 12))
-                        .foregroundColor(palette.danger)
+                .frame(maxWidth: .infinity)
+            } else {
+                column {
+                    primaryCards
+                    secondaryCards
                 }
             }
-            .padding(20)
+        }
+    }
+
+    private func column<Content: View>(padding edges: Edge.Set = .all,
+                                       @ViewBuilder _ content: () -> Content) -> some View {
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: 16, content: content)
+                .padding(edges, 20)
+        }
+    }
+
+    @ViewBuilder
+    private var primaryCards: some View {
+        deviceHero
+        ambientCard
+        if model.mode == .ambientSound {
+            ambientLevelCard
+        }
+    }
+
+    @ViewBuilder
+    private var secondaryCards: some View {
+        if model.multipointLoading || model.hasPairedDevices || model.hasPlaybackPinState {
+            devicesCard
+        }
+        if model.supportsEqualizer {
+            equalizerCard
+        }
+        if model.supportsDsee {
+            dseeCard
+        }
+        if model.hasAdaptiveVolume || model.hasSpeakToChat || model.hasAutoPowerOff || model.hasMultipointSetting {
+            settingsCard
+        }
+        if let error = model.errorMessage {
+            Text(error)
+                .font(.system(size: 12))
+                .foregroundColor(palette.danger)
         }
     }
 
@@ -121,50 +133,14 @@ struct ContentView: View {
             // copyrighted and can't be bundled) over the theme's backdrop, mirroring Sony's app layout.
             ZStack {
                 HeroBackdrop()
-
-                if let image = deviceImage() {
-                    // Background-removed product cutout floating on the backdrop.
-                    Image(nsImage: image)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: 190, height: 190)
-                } else {
-                    Image(systemName: "headphones")
-                        .font(.system(size: 92, weight: .thin))
-                        .foregroundColor(palette.primary)
-                }
+                ProductImage(deviceName: model.deviceName, size: 190)
             }
 
             Text(model.deviceName)
                 .font(.system(size: 24, weight: .bold))
                 .foregroundColor(palette.primary)
 
-            HStack(spacing: 6) {
-                chip {
-                    if model.hasDualBattery {
-                        // Earbuds report a battery each, plus the case when it's connected. An earbud that
-                        // isn't reporting (docked / powered down) comes through as -1 and is left out.
-                        budBattery("L", model.batteryLeft, charging: model.batteryLeftCharging)
-                        Text("·")
-                        budBattery("R", model.batteryRight, charging: model.batteryRightCharging)
-                        if model.batteryCase >= 0 {
-                            Text("·")
-                            budBattery("Case", model.batteryCase, charging: model.batteryCaseCharging)
-                        }
-                    } else if model.batteryLevel >= 0 {
-                        Image(systemName: model.batteryCharging ? "bolt.fill" : batterySymbol(model.batteryLevel))
-                            .foregroundColor(model.batteryLevel <= 20 ? palette.danger : palette.accent)
-                        chipText("\(model.batteryLevel)%")
-                    } else {
-                        Circle().fill(palette.accent).frame(width: 6, height: 6)
-                        chipText("Connected")
-                    }
-                }
-                if !model.codec.isEmpty {
-                    chip { chipText(model.codec) }
-                }
-                chip { chipText(modeName(model.mode)) }
-            }
+            StatusChips(model: model)
         }
         .padding(.bottom, 4)
     }
@@ -178,21 +154,6 @@ struct ContentView: View {
             .overlay(Circle().strokeBorder(palette.cardStroke, lineWidth: 1))
     }
 
-    private func chip<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        HStack(spacing: 4, content: content)
-            .font(.system(size: theme.isSignature ? 10 : 11, weight: .semibold))
-            .foregroundColor(palette.secondary)
-            .lineLimit(1)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 4)
-            .background(palette.raised, in: Capsule())
-            .overlay(Capsule().strokeBorder(palette.cardStroke, lineWidth: 1))
-    }
-
-    private func chipText(_ text: String) -> Text {
-        Text(theme.isSignature ? text.uppercased() : text).tracking(theme.isSignature ? 0.8 : 0)
-    }
-
     private func cardTitle(_ title: String) -> some View {
         Text(theme.isSignature ? title.uppercased() : title)
             .font(.system(size: theme.isSignature ? 11 : 15, weight: .semibold))
@@ -200,70 +161,12 @@ struct ContentView: View {
             .foregroundColor(theme.isSignature ? palette.secondary : palette.primary)
     }
 
-    private func modeName(_ mode: SHCAmbientMode) -> String {
-        switch mode {
-        case .noiseCanceling: return "Noise Canceling"
-        case .ambientSound: return "Ambient"
-        default: return "Off"
-        }
-    }
-
-    // Selected/idle look shared by the mode control and the EQ presets: pills in Sony Signature,
-    // rounded segments otherwise. Pills must be a real Capsule: a continuous RoundedRectangle with a
-    // radius near half the height has no room for its corner curves and renders flat-sided ends.
-    @ViewBuilder
-    private func selectable<Label: View>(_ label: Label, selected: Bool, idleFill: Color) -> some View {
-        if theme.isSignature {
-            selectionChrome(label, in: Capsule(), selected: selected, idleFill: idleFill)
-        } else {
-            selectionChrome(label, in: RoundedRectangle(cornerRadius: 8, style: .continuous),
-                            selected: selected, idleFill: idleFill)
-        }
-    }
-
-    // The content shape keeps clear (idle) segments clickable.
-    private func selectionChrome<Label: View, S: InsettableShape>(_ label: Label, in shape: S,
-                                                                  selected: Bool, idleFill: Color) -> some View {
-        label
-            .foregroundColor(selected ? palette.selectedText : palette.secondary)
-            .background(selected ? palette.selectedFill : idleFill, in: shape)
-            .overlay(shape.strokeBorder(selected ? palette.selectedStroke
-                                        : (theme.isSignature ? palette.cardStroke : .clear), lineWidth: 1))
-            .contentShape(shape)
-    }
-
     private var ambientCard: some View {
-        let track = RoundedRectangle(cornerRadius: 11, style: .continuous)
-        return VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 16) {
             cardTitle("Ambient Sound Control")
-            HStack(spacing: theme.isSignature ? 6 : 0) {
-                modeButton(.noiseCanceling)
-                modeButton(.ambientSound)
-                modeButton(.off)
-            }
-            .padding(theme.isSignature ? 0 : 3)
-            .background(palette.track, in: track)
-            .overlay(track.strokeBorder(theme.isSignature ? .clear : palette.cardStroke, lineWidth: 1))
+            AmbientModeControl(model: model)
         }
         .themedCard()
-    }
-
-    private func modeButton(_ mode: SHCAmbientMode) -> some View {
-        let selected = model.mode == mode
-        return Button(action: { model.setMode(mode) }) {
-            selectable(
-                Text(modeName(mode))
-                    .font(.system(size: 11.5, weight: .semibold))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                    .padding(.horizontal, 8)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8),
-                selected: selected, idleFill: .clear
-            )
-            .shadow(color: selected ? palette.selectedShadow : .clear, radius: 8)
-        }
-        .buttonStyle(.plain)
     }
 
     private var ambientLevelCard: some View {
@@ -277,40 +180,16 @@ struct ContentView: View {
                     .font(.system(size: 20, weight: .bold, design: theme.isSignature ? .monospaced : .rounded))
                     .foregroundColor(palette.accentText)
             }
-            Slider(
-                value: Binding(
-                    get: { Double(model.ambientLevel) },
-                    set: { model.setLevel(Int($0.rounded())) }
-                ),
-                in: 1...Double(model.maxAmbientLevel),
-                step: 1
-            )
-            .accentColor(palette.accent)
+            AmbientLevelSlider(model: model)
 
             if model.focusOnVoiceAvailable {
-                switchRow("Focus on Voice", isOn: Binding(
-                    get: { model.focusOnVoice },
-                    set: { model.setFocusOnVoice($0) }
-                )) {
-                    Text("Focus on Voice")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(palette.primary)
-                }
+                FocusOnVoiceSwitch(model: model)
             }
         }
         .themedCard()
     }
 
-    private let eqPresets: [(String, Int)] = [
-        ("Off", 0x00), ("Bright", 0x10), ("Excited", 0x11),
-        ("Mellow", 0x12), ("Relaxed", 0x13), ("Vocal", 0x14),
-        ("Treble", 0x15), ("Bass", 0x16), ("Speech", 0x17),
-        ("Manual", 0xA0)
-    ]
     private let eqBandLabels = ["400", "1k", "2.5k", "6.3k", "16k"]
-    // WH-1000XM6: only Off and Custom have confirmed preset codes on the ten-band layout; its other preset
-    // bytes (0x20, 0x30-0x33, 0xa1-0xa2) are unnamed, and the 5-band codes above don't apply to it.
-    private let tenBandEqPresets: [(String, Int)] = [("Off", 0x00), ("Custom", 0xA0)]
     private let tenBandEqLabels = ["31", "63", "125", "250", "500", "1k", "2k", "4k", "8k", "16k"]
 
     private var equalizerCard: some View {
@@ -318,7 +197,7 @@ struct ContentView: View {
             cardTitle("Equalizer")
             EQPreview(bands: model.eqBands, range: model.tenBandEqualizer ? 0...12 : -10...10)
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-                ForEach(model.tenBandEqualizer ? tenBandEqPresets : eqPresets, id: \.1) { preset in
+                ForEach(EQPresets.list(tenBand: model.tenBandEqualizer), id: \.1) { preset in
                     eqChip(preset.0, preset.1)
                 }
             }
@@ -358,7 +237,7 @@ struct ContentView: View {
     }
 
     private var dseeCard: some View {
-        switchRow("DSEE", isOn: Binding(get: { model.dsee }, set: { model.setDsee($0) })) {
+        SwitchRow("DSEE", isOn: Binding(get: { model.dsee }, set: { model.setDsee($0) })) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("DSEE").font(.system(size: 14, weight: .semibold)).foregroundColor(palette.primary)
                 Text("Upscale compressed audio").font(.system(size: 11)).foregroundColor(palette.secondary)
@@ -370,13 +249,11 @@ struct ContentView: View {
     private func eqChip(_ name: String, _ code: Int) -> some View {
         let selected = model.eqPreset == code
         return Button(action: { model.setEqualizer(code) }) {
-            selectable(
-                Text(name)
-                    .font(.system(size: 12, weight: .medium))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8),
-                selected: selected, idleFill: palette.track
-            )
+            Text(name)
+                .font(.system(size: 12, weight: .medium))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .selectable(selected, filledWhenIdle: true)
         }
         .buttonStyle(PlainButtonStyle())
     }
@@ -393,7 +270,7 @@ struct ContentView: View {
             if model.hasSpeakToChat {
                 settingToggle("Speak-to-Chat", "Pause music when you talk",
                               on: model.speakToChat) { model.setSpeakToChat($0) }
-                switchRow("Keep off on connect", isOn: $model.keepSpeakToChatOff) {
+                SwitchRow("Keep off on connect", isOn: $model.keepSpeakToChatOff) {
                     Text("Keep off on connect")
                         .font(.system(size: 11))
                         .foregroundColor(palette.secondary)
@@ -428,24 +305,11 @@ struct ContentView: View {
     }
 
     private func settingToggle(_ title: String, _ subtitle: String, on: Bool, action: @escaping (Bool) -> Void) -> some View {
-        switchRow(title, isOn: Binding(get: { on }, set: { action($0) })) {
+        SwitchRow(title, isOn: Binding(get: { on }, set: { action($0) })) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.system(size: 14, weight: .semibold)).foregroundColor(palette.primary)
                 Text(subtitle).font(.system(size: 11)).foregroundColor(palette.secondary)
             }
-        }
-    }
-
-    // Label on the left, switch on the trailing edge, so every switch in the window lines up.
-    // The title stays on the hidden Toggle label for VoiceOver.
-    private func switchRow<Label: View>(_ title: String, isOn: Binding<Bool>,
-                                        @ViewBuilder label: () -> Label) -> some View {
-        HStack {
-            label()
-            Spacer()
-            Toggle(title, isOn: isOn)
-                .labelsHidden()
-                .toggleStyle(SwitchToggleStyle(tint: palette.accent))
         }
     }
 
@@ -488,16 +352,9 @@ struct ContentView: View {
                             .font(.system(size: 11)).foregroundColor(palette.secondary)
                     }
                     Spacer()
-                    Button(action: { model.setPlaybackPinned(!model.playbackPinned) }) {
-                        Text(model.playbackPinned ? "Unfix" : "Fix")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(palette.primary)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 5)
-                            .background(palette.raised, in: Capsule())
-                            .overlay(Capsule().strokeBorder(palette.cardStroke, lineWidth: 1))
+                    CapsuleButton(model.playbackPinned ? "Unfix" : "Fix") {
+                        model.setPlaybackPinned(!model.playbackPinned)
                     }
-                    .buttonStyle(PlainButtonStyle())
                     .disabled(model.multipointBusy)
                 }
             }
@@ -679,11 +536,112 @@ struct ContentView: View {
         }
         .padding(.vertical, 3)
     }
+}
 
-    // Matches the connected device name to a bundled product image (e.g. "WH-CH720N" -> "wh-ch720n").
-    private func deviceImage() -> NSImage? {
-        let slug = model.deviceName.lowercased().replacingOccurrences(of: " ", with: "-")
-        return NSImage(named: slug)
+// MARK: - Shared with the menu-bar panel
+
+enum EQPresets {
+    static let fiveBand: [(String, Int)] = [
+        ("Off", 0x00), ("Bright", 0x10), ("Excited", 0x11),
+        ("Mellow", 0x12), ("Relaxed", 0x13), ("Vocal", 0x14),
+        ("Treble", 0x15), ("Bass", 0x16), ("Speech", 0x17),
+        ("Manual", 0xA0)
+    ]
+    // WH-1000XM6: only Off and Custom have confirmed preset codes on the ten-band layout; its other preset
+    // bytes (0x20, 0x30-0x33, 0xa1-0xa2) are unnamed, and the 5-band codes above don't apply to it.
+    static let tenBand: [(String, Int)] = [("Off", 0x00), ("Custom", 0xA0)]
+
+    static func list(tenBand: Bool) -> [(String, Int)] { tenBand ? Self.tenBand : fiveBand }
+}
+
+extension SHCAmbientMode {
+    var displayName: String {
+        switch self {
+        case .noiseCanceling: return "Noise Canceling"
+        case .ambientSound: return "Ambient"
+        default: return "Off"
+        }
+    }
+}
+
+// The bundled product cutout matching the device name (e.g. "WH-CH720N" -> "wh-ch720n"), or a generic
+// headphones glyph for models without one.
+struct ProductImage: View {
+    let deviceName: String
+    let size: CGFloat
+
+    @Environment(\.appTheme) private var theme
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        if let image = NSImage(named: deviceName.lowercased().replacingOccurrences(of: " ", with: "-")) {
+            Image(nsImage: image)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: size, height: size)
+        } else {
+            Image(systemName: "headphones")
+                .font(.system(size: size * 0.48, weight: .thin))
+                .foregroundColor(theme.palette(colorScheme).primary)
+                .frame(width: size, height: size)
+        }
+    }
+}
+
+// Battery, codec and (optionally) the current mode as capsule chips.
+struct StatusChips: View {
+    @ObservedObject var model: HeadphonesModel
+    var showsMode = true
+
+    @Environment(\.appTheme) private var theme
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var palette: Palette { theme.palette(colorScheme) }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            chip {
+                if model.hasDualBattery {
+                    // Earbuds report a battery each, plus the case when it's connected. An earbud that
+                    // isn't reporting (docked / powered down) comes through as -1 and is left out.
+                    budBattery("L", model.batteryLeft, charging: model.batteryLeftCharging)
+                    Text("·")
+                    budBattery("R", model.batteryRight, charging: model.batteryRightCharging)
+                    if model.batteryCase >= 0 {
+                        Text("·")
+                        budBattery("Case", model.batteryCase, charging: model.batteryCaseCharging)
+                    }
+                } else if model.batteryLevel >= 0 {
+                    Image(systemName: model.batteryCharging ? "bolt.fill" : batterySymbol(model.batteryLevel))
+                        .foregroundColor(model.batteryLevel <= 20 ? palette.danger : palette.accent)
+                    chipText("\(model.batteryLevel)%")
+                } else {
+                    Circle().fill(palette.accent).frame(width: 6, height: 6)
+                    chipText("Connected")
+                }
+            }
+            if !model.codec.isEmpty {
+                chip { chipText(model.codec) }
+            }
+            if showsMode {
+                chip { chipText(model.mode.displayName) }
+            }
+        }
+    }
+
+    private func chip<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        HStack(spacing: 4, content: content)
+            .font(.system(size: theme.isSignature ? 10 : 11, weight: .semibold))
+            .foregroundColor(palette.secondary)
+            .lineLimit(1)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4)
+            .background(palette.raised, in: Capsule())
+            .overlay(Capsule().strokeBorder(palette.cardStroke, lineWidth: 1))
+    }
+
+    private func chipText(_ text: String) -> Text {
+        Text(theme.isSignature ? text.uppercased() : text).tracking(theme.isSignature ? 0.8 : 0)
     }
 
     // One "L 82%" reading in the battery chip, with a bolt in place of the battery glyph while that unit
@@ -708,170 +666,102 @@ struct ContentView: View {
     }
 }
 
-// MARK: - Menu bar
+// Noise Canceling / Ambient / Off: segments in a recessed track, or separate pills in Sony Signature.
+struct AmbientModeControl: View {
+    @ObservedObject var model: HeadphonesModel
 
-// Status-bar item for pinning playback to this Mac without opening the window. Installed once from
-// AppDelegate; reads and drives the same HeadphonesModel as the window. The icon shows the playback device
-// next to the headphones (phone, computer, or its multipoint slot number), and the headphones fill in
-// while playback is fixed to this Mac.
-@objc final class MenuBarController: NSObject, NSMenuDelegate {
-    private static var instance: MenuBarController?
+    @Environment(\.appTheme) private var theme
+    @Environment(\.colorScheme) private var colorScheme
 
-    private let model = HeadphonesModel.shared
-    private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-    private var cancellables = Set<AnyCancellable>()
+    private var palette: Palette { theme.palette(colorScheme) }
 
-    @objc static func install() {
-        guard instance == nil else { return }
-        instance = MenuBarController()
+    var body: some View {
+        let track = RoundedRectangle(cornerRadius: 11, style: .continuous)
+        HStack(spacing: theme.isSignature ? 6 : 0) {
+            modeButton(.noiseCanceling)
+            modeButton(.ambientSound)
+            modeButton(.off)
+        }
+        .padding(theme.isSignature ? 0 : 3)
+        .background(palette.track, in: track)
+        .overlay(track.strokeBorder(theme.isSignature ? .clear : palette.cardStroke, lineWidth: 1))
     }
 
-    private override init() {
-        super.init()
-        let menu = NSMenu()
-        menu.delegate = self
-        menu.autoenablesItems = false
-        statusItem.menu = menu
-        updateIcon()
-        // objectWillChange fires before the new values land, so read them on the next main-loop turn.
-        model.objectWillChange
-            .sink { [weak self] _ in DispatchQueue.main.async { self?.updateIcon() } }
-            .store(in: &cancellables)
+    private func modeButton(_ mode: SHCAmbientMode) -> some View {
+        let selected = model.mode == mode
+        return Button(action: { model.setMode(mode) }) {
+            Text(mode.displayName)
+                .font(.system(size: 11.5, weight: .semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .padding(.horizontal, 8)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .selectable(selected)
+                .shadow(color: selected ? palette.selectedShadow : .clear, radius: 8)
+        }
+        .buttonStyle(.plain)
     }
+}
 
-    private var thisMac: PairedDeviceInfo? {
-        model.pairedDevices.first { $0.isThisMac && $0.connected }
+struct AmbientLevelSlider: View {
+    @ObservedObject var model: HeadphonesModel
+
+    @Environment(\.appTheme) private var theme
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        Slider(
+            value: Binding(
+                get: { Double(model.ambientLevel) },
+                set: { model.setLevel(Int($0.rounded())) }
+            ),
+            in: 1...Double(model.maxAmbientLevel),
+            step: 1
+        )
+        .accentColor(theme.palette(colorScheme).accent)
     }
+}
 
-    private var pinnedToThisMac: Bool {
-        model.playbackPinned && thisMac?.playback == true
-    }
+struct FocusOnVoiceSwitch: View {
+    @ObservedObject var model: HeadphonesModel
 
-    private var playbackDevice: PairedDeviceInfo? {
-        model.connected ? model.pairedDevices.first { $0.playback } : nil
-    }
+    @Environment(\.appTheme) private var theme
+    @Environment(\.colorScheme) private var colorScheme
 
-    // Phone if the name says so, computer for this Mac (or another Mac), otherwise the slot number.
-    private func playbackSymbol(for device: PairedDeviceInfo) -> String {
-        let name = device.name.lowercased()
-        if name.contains("phone") { return "iphone" }
-        if device.isThisMac || name.contains("mac") { return "laptopcomputer" }
-        return "\(device.slot).circle"
-    }
-
-    private func updateIcon() {
-        let base = pinnedToThisMac ? "headphones.circle.fill" : "headphones"
-        let device = playbackDevice
-        statusItem.button?.image = Self.icon(base: base, accessory: device.map(playbackSymbol(for:)))
-        statusItem.button?.appearsDisabled = !model.connected
-        if let device = device {
-            let name = device.name.isEmpty ? device.address : device.name
-            statusItem.button?.toolTip = "Playing on \(name)" + (model.playbackPinned ? " (fixed)" : "")
-        } else {
-            statusItem.button?.toolTip = model.connected ? model.deviceName : "SonyBridge"
+    var body: some View {
+        SwitchRow("Focus on Voice", isOn: Binding(
+            get: { model.focusOnVoice },
+            set: { model.setFocusOnVoice($0) }
+        )) {
+            Text("Focus on Voice")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(theme.palette(colorScheme).primary)
         }
     }
+}
 
-    // Draws the headphones symbol with an optional second symbol beside it, as one template image.
-    private static func icon(base: String, accessory: String?) -> NSImage? {
-        let baseConfig = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
-        let accessoryConfig = NSImage.SymbolConfiguration(pointSize: 11, weight: .regular)
-        guard let baseImage = NSImage(systemSymbolName: base, accessibilityDescription: "SonyBridge")?
-            .withSymbolConfiguration(baseConfig) else { return nil }
-        guard let accessory = accessory,
-              let accessoryImage = NSImage(systemSymbolName: accessory, accessibilityDescription: nil)?
-                .withSymbolConfiguration(accessoryConfig) else {
-            baseImage.isTemplate = true
-            return baseImage
+struct ConnectButton: View {
+    @ObservedObject var model: HeadphonesModel
+
+    @Environment(\.appTheme) private var theme
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        let palette = theme.palette(colorScheme)
+        // Activate first: from the menu-bar panel the app isn't frontmost, and the device picker the
+        // connect shows would open behind other apps.
+        Button(action: { NSApp.activate(ignoringOtherApps: true); model.connect() }) {
+            Text(model.connecting ? "Connecting…" : "Connect headphones")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(palette.onAccent)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(palette.accent)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
-        let spacing: CGFloat = 2
-        let size = NSSize(width: baseImage.size.width + spacing + accessoryImage.size.width,
-                          height: max(baseImage.size.height, accessoryImage.size.height))
-        let image = NSImage(size: size, flipped: false) { _ in
-            baseImage.draw(in: NSRect(x: 0, y: (size.height - baseImage.size.height) / 2,
-                                      width: baseImage.size.width, height: baseImage.size.height))
-            accessoryImage.draw(in: NSRect(x: baseImage.size.width + spacing, y: (size.height - accessoryImage.size.height) / 2,
-                                           width: accessoryImage.size.width, height: accessoryImage.size.height))
-            return true
-        }
-        image.isTemplate = true
-        image.accessibilityDescription = "SonyBridge"
-        return image
-    }
-
-    func menuNeedsUpdate(_ menu: NSMenu) {
-        menu.removeAllItems()
-        if model.connected {
-            menu.addItem(disabledItem(model.deviceName))
-            if model.hasPlaybackPinState {
-                if thisMac != nil {
-                    let pin = actionItem(pinnedToThisMac ? "Playback Fixed to This Mac" : "Pin Playback to This Mac",
-                                         #selector(pinToThisMac))
-                    pin.state = pinnedToThisMac ? .on : .off
-                    pin.isEnabled = !pinnedToThisMac && !model.multipointBusy
-                    menu.addItem(pin)
-                } else {
-                    menu.addItem(disabledItem("This Mac isn't a connected device"))
-                }
-                if model.playbackPinned {
-                    let unfix = actionItem("Unfix Playback", #selector(unfixPlayback))
-                    unfix.isEnabled = !model.multipointBusy
-                    menu.addItem(unfix)
-                }
-            }
-            if model.multipointBusy {
-                menu.addItem(disabledItem("Sending…"))
-            } else if let error = model.errorMessage {
-                menu.addItem(disabledItem(error))
-            }
-            // Re-read so the next open reflects changes made from the phone or the headset.
-            if !model.multipointBusy && !model.refreshingMultipoint {
-                model.refreshMultipoint()
-            }
-        } else {
-            menu.addItem(disabledItem("No headphones connected"))
-            let connect = actionItem(model.connecting ? "Connecting…" : "Connect Headphones", #selector(connectHeadphones))
-            connect.isEnabled = !model.connecting
-            menu.addItem(connect)
-        }
-        menu.addItem(.separator())
-        menu.addItem(actionItem("Open SonyBridge", #selector(openWindow)))
-        menu.addItem(actionItem("Quit SonyBridge", #selector(quit), key: "q"))
-    }
-
-    @objc private func pinToThisMac() {
-        guard let thisMac = thisMac else { return }
-        model.switchPlayback(to: thisMac, fix: true)
-    }
-
-    @objc private func unfixPlayback() {
-        model.setPlaybackPinned(false)
-    }
-
-    @objc private func connectHeadphones() {
-        NSApp.activate(ignoringOtherApps: true)
-        model.connect()
-    }
-
-    @objc private func openWindow() {
-        NSApp.activate(ignoringOtherApps: true)
-        NSApp.windows.first { $0.contentViewController != nil }?.makeKeyAndOrderFront(nil)
-    }
-
-    @objc private func quit() {
-        NSApp.terminate(nil)
-    }
-
-    private func actionItem(_ title: String, _ action: Selector, key: String = "") -> NSMenuItem {
-        let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
-        item.target = self
-        return item
-    }
-
-    private func disabledItem(_ title: String) -> NSMenuItem {
-        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-        item.isEnabled = false
-        return item
+        .buttonStyle(PlainButtonStyle())
+        .disabled(model.connecting)
     }
 }
 

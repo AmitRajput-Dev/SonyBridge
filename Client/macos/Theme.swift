@@ -1,6 +1,6 @@
 //
 //  Theme.swift
-//  The window's three looks: palettes, the shared card style, and the theme-specific drawings.
+//  The app's three looks: palettes, the shared card and control styles, and the theme-specific drawings.
 //
 
 import SwiftUI
@@ -21,6 +21,19 @@ enum AppTheme: String, CaseIterable, Identifiable {
 
     // Native Glass follows the system appearance; the other two are designed dark-only.
     var colorScheme: ColorScheme? { self == .nativeGlass ? nil : .dark }
+
+    static let storageKey = "appTheme"
+
+    static var stored: AppTheme {
+        UserDefaults.standard.string(forKey: storageKey).flatMap(AppTheme.init(rawValue:)) ?? .refinedDark
+    }
+
+    // Applied app-wide so the window, its popovers and the menu-bar panel all follow the theme. Not
+    // .preferredColorScheme: on macOS, once it has forced a window dark, setting it back to nil doesn't
+    // return the window to the system appearance, so Native Glass would stay dark until relaunch.
+    func applyToApp() {
+        NSApp.appearance = colorScheme == .dark ? NSAppearance(named: .darkAqua) : nil
+    }
 
     // Sony Signature changes shapes as well as colors: pill buttons, uppercase tracked labels,
     // monospaced numbers, EQ as bars and rings behind the product.
@@ -146,22 +159,115 @@ extension EnvironmentValues {
 }
 
 private struct ThemedCard: ViewModifier {
+    let compact: Bool
+
     @Environment(\.appTheme) private var theme
     @Environment(\.colorScheme) private var colorScheme
 
     func body(content: Content) -> some View {
         let palette = theme.palette(colorScheme)
-        let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: compact ? 12 : 16, style: .continuous)
         return content
-            .padding(18)
+            .padding(compact ? 12 : 18)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(palette.card, in: shape)
             .overlay(shape.strokeBorder(palette.cardStroke, lineWidth: 1))
     }
 }
 
+// Selected/idle look shared by the mode control and the EQ presets: pills in Sony Signature, rounded
+// segments otherwise. Pills must be a real Capsule: a continuous RoundedRectangle with a radius near half
+// the height has no room for its corner curves and renders flat-sided ends.
+private struct Selectable: ViewModifier {
+    let selected: Bool
+    let filledWhenIdle: Bool
+
+    @Environment(\.appTheme) private var theme
+    @Environment(\.colorScheme) private var colorScheme
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if theme.isSignature {
+            chrome(content, in: Capsule())
+        } else {
+            chrome(content, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+    }
+
+    // The content shape keeps clear (idle) segments clickable.
+    private func chrome<S: InsettableShape>(_ content: Content, in shape: S) -> some View {
+        let palette = theme.palette(colorScheme)
+        return content
+            .foregroundColor(selected ? palette.selectedText : palette.secondary)
+            .background(selected ? palette.selectedFill : (filledWhenIdle ? palette.track : .clear), in: shape)
+            .overlay(shape.strokeBorder(selected ? palette.selectedStroke
+                                        : (theme.isSignature ? palette.cardStroke : .clear), lineWidth: 1))
+            .contentShape(shape)
+    }
+}
+
 extension View {
-    func themedCard() -> some View { modifier(ThemedCard()) }
+    // compact: the menu-bar panel's tighter card.
+    func themedCard(compact: Bool = false) -> some View { modifier(ThemedCard(compact: compact)) }
+
+    func selectable(_ selected: Bool, filledWhenIdle: Bool = false) -> some View {
+        modifier(Selectable(selected: selected, filledWhenIdle: filledWhenIdle))
+    }
+}
+
+// Label on the left, switch on the trailing edge, so every switch lines up.
+// The title stays on the hidden Toggle label for VoiceOver.
+struct SwitchRow<Label: View>: View {
+    private let title: String
+    private let isOn: Binding<Bool>
+    private let label: Label
+
+    @Environment(\.appTheme) private var theme
+    @Environment(\.colorScheme) private var colorScheme
+
+    init(_ title: String, isOn: Binding<Bool>, @ViewBuilder label: () -> Label) {
+        self.title = title
+        self.isOn = isOn
+        self.label = label()
+    }
+
+    var body: some View {
+        HStack {
+            label
+            Spacer()
+            Toggle(title, isOn: isOn)
+                .labelsHidden()
+                .toggleStyle(SwitchToggleStyle(tint: theme.palette(colorScheme).accent))
+        }
+    }
+}
+
+// Small secondary action, e.g. Fix / Unfix playback.
+struct CapsuleButton: View {
+    private let title: String
+    private let action: () -> Void
+
+    @Environment(\.appTheme) private var theme
+    @Environment(\.colorScheme) private var colorScheme
+
+    init(_ title: String, action: @escaping () -> Void) {
+        self.title = title
+        self.action = action
+    }
+
+    var body: some View {
+        let palette = theme.palette(colorScheme)
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(palette.primary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 5)
+                .background(palette.raised, in: Capsule())
+                .overlay(Capsule().strokeBorder(palette.cardStroke, lineWidth: 1))
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
 }
 
 // Light behind the product image: a soft glow, or Sony Signature's warm rim and rings.

@@ -432,3 +432,22 @@ final class HeadphonesModel: ObservableObject {
         assignIfChanged(\.focusOnVoiceAvailable, bridge.focusOnVoiceAvailable)
     }
 }
+
+// Playback-pin shortcuts shared by the menu-bar menu and the quick-controls panel.
+extension HeadphonesModel {
+    var thisMac: PairedDeviceInfo? {
+        pairedDevices.first { $0.isThisMac && $0.connected }
+    }
+
+    var playbackPinnedToThisMac: Bool {
+        playbackPinned && thisMac?.playback == true
+    }
+
+    var playbackDevice: PairedDeviceInfo? {
+        connected ? pairedDevices.first { $0.playback } : nil
+    }
+
+    func pinPlaybackToThisMac() {
+        if let thisMac = thisMac { switchPlayback(to: thisMac, fix: true) }
+    }
+}
