@@ -28,9 +28,9 @@
 
 <br/>
 
-<img src="docs/connected.png" width="330" alt="SonyBridge connected to a WH-CH720N">
-&nbsp;&nbsp;
-<img src="docs/disconnected.png" width="330" alt="SonyBridge disconnected state">
+<img src="docs/screenshots/themes.png" width="100%" alt="SonyBridge in its three themes: Refined Dark, Native Glass and Sony Signature">
+
+<sub>Three looks, one app: <b>Refined Dark</b> · <b>Native Glass</b> (follows light/dark) · <b>Sony Signature</b> — pick one under ⋯ → Appearance.</sub>
 
 </div>
 
@@ -51,7 +51,7 @@ on macOS, and a matching modern UI on Windows/Linux.
 
 - 🎚️ **Ambient Sound Control** — Noise Cancelling · Ambient Sound (0–20 levels) · Off
 - 🗣️ **Focus on Voice** passthrough
-- 🎛️ **Equalizer** — presets *and* a full **Manual mode** with 5 bands + Clear Bass
+- 🎛️ **Equalizer** — presets *and* a full **Manual mode** with 5 bands + Clear Bass (10 bands on the WH-1000XM6), with a live curve preview
 - ✨ **DSEE** — Sony's audio upscaling for compressed sources
 - 🔋 **Battery level** — live percentage, including **per-earbud + case** for TWS models
 - 🎧 **Codec & firmware** readout
@@ -59,8 +59,34 @@ on macOS, and a matching modern UI on Windows/Linux.
 - 🖼️ **Device hero image** — your headphones' official Sony product render
 - 🔄 **Live button sync** — changes made on the headset reflect in the app
 - 🔌 **Auto-connect** to your already-paired Sony headset
+- 🍫 **Menu-bar quick controls** — click the menu-bar icon for mode, ambient level, Focus on Voice, EQ preset, battery and playback pinning without opening the window (right-click for the menu)
+- ↔️ **Resizable window** — a tall single column by default; widen it past 720pt for a two-column layout
+- 📱 **Multipoint** — see which devices are connected, switch playback between them, pin playback to this Mac, and turn "Connect to 2 devices" on or off
 - 🧬 **Dual-protocol** — auto-detects and speaks either protocol generation
-- 🌑 **Modern UI** — dark, minimal, shaped after Sony's own app (SwiftUI on macOS, Dear ImGui on Windows/Linux)
+- 🌑 **Modern UI** — three themes on macOS (Refined Dark, Native Glass, Sony Signature), shaped after Sony's own app; Dear ImGui on Windows/Linux
+
+<details>
+<summary><b>📸 Full screenshots</b></summary>
+<br/>
+
+| Refined Dark | Native Glass (light) | Native Glass (dark) | Sony Signature |
+| :---: | :---: | :---: | :---: |
+| <img src="docs/screenshots/refined-dark.png" width="200" alt="Refined Dark theme"> | <img src="docs/screenshots/native-glass-light.png" width="200" alt="Native Glass theme, light"> | <img src="docs/screenshots/native-glass-dark.png" width="200" alt="Native Glass theme, dark"> | <img src="docs/screenshots/sony-signature.png" width="200" alt="Sony Signature theme"> |
+
+**Wide window (two columns)**
+
+<img src="docs/screenshots/wide-refined-dark.png" width="100%" alt="Two-column window, Refined Dark">
+
+| Menu-bar panel: Refined Dark | Native Glass | Sony Signature |
+| :---: | :---: | :---: |
+| <img src="docs/screenshots/panel-refined-dark.png" width="240" alt="Menu-bar quick controls, Refined Dark"> | <img src="docs/screenshots/panel-native-glass-light.png" width="240" alt="Menu-bar quick controls, Native Glass"> | <img src="docs/screenshots/panel-sony-signature.png" width="240" alt="Menu-bar quick controls, Sony Signature"> |
+
+**WH-1000XM6 ten-band equalizer**
+
+<img src="docs/screenshots/xm6-ten-band-eq.png" width="380" alt="Ten-band equalizer on the WH-1000XM6">
+
+<sub>Rendered from the app's own views; the device list shows placeholder names.</sub>
+</details>
 
 ## 📥 Download
 
@@ -72,12 +98,12 @@ on macOS, and a matching modern UI on Windows/Linux.
 <td><b>macOS</b></td>
 <td>
 
-`brew tap AmitRajput-Dev/tap && brew install --cask sonybridge`
+`brew install --cask amitrajput-dev/tap/sonybridge`
 
 or [**Download .app**](https://github.com/AmitRajput-Dev/SonyBridge/releases/latest)
 
 </td>
-<td>macOS 11+ · Apple Silicon &amp; Intel</td>
+<td>macOS 12+ · Apple Silicon &amp; Intel</td>
 </tr>
 <tr>
 <td><b>Windows</b></td>

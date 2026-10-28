@@ -1,9 +1,12 @@
 #include "CrossPlatformGUI.h"
 
+#include "imgui_internal.h"   // ImGui::RegisterUserTexture()
+
 #include <string>
 #include <vector>
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
 
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_PNG
@@ -192,6 +195,8 @@ void CrossPlatformGUI::_pumpConnectionState()
 			try { this->_headphones.requestAmbientState(); } catch (const std::exception&) {}
 			if (this->_isV2())
 			{
+				// Lets requestBattery() probe the per-earbud layout first on TWS models (WF-*/LinkBuds).
+				this->_headphones.setDeviceName(this->_connectedDevice.name);
 				try { this->_headphones.requestBattery(); } catch (const std::exception&) {}
 				try { this->_headphones.requestEqualizer(); } catch (const std::exception&) {}
 				try { this->_headphones.requestDsee(); } catch (const std::exception&) {}
@@ -241,7 +246,26 @@ void CrossPlatformGUI::_pumpConnectionState()
 	if (!this->_pollFuture.valid() && ++this->_pollCounter >= DYNAMIC_POLL_FRAMES)
 	{
 		this->_pollCounter = 0;
-		this->_pollFuture.setFromAsync([this]() { this->_headphones.requestAmbientState(); });
+
+		// Battery is otherwise read once, in the post-connect phase, and never again: the header keeps
+		// showing the level from the moment you connected for as long as the app stays open. Refresh it
+		// on the same worker, on its own slower schedule.
+		bool withBattery = false;
+		this->_batteryPollCounter += DYNAMIC_POLL_FRAMES;
+		if (this->_isV2() && this->_batteryPollCounter >= BATTERY_POLL_FRAMES)
+		{
+			this->_batteryPollCounter = 0;
+			withBattery = true;
+		}
+
+		this->_pollFuture.setFromAsync([this, withBattery]() {
+			this->_headphones.requestAmbientState();
+			// Best effort: a device that doesn't answer the battery inquiry must not kill the poll.
+			if (withBattery)
+			{
+				try { this->_headphones.requestBattery(); } catch (const std::exception&) {}
+			}
+		});
 	}
 }
 
@@ -317,8 +341,12 @@ const CrossPlatformGUI::DeviceTexture& CrossPlatformGUI::_deviceTexture(const st
 		ImTextureData* tex = IM_NEW(ImTextureData)();
 		tex->Create(ImTextureFormat_RGBA32, w, h);
 		memcpy(tex->GetPixels(), pixels, (size_t)w * h * 4);
-		tex->SetStatus(ImTextureStatus_WantCreate);
-		ImGui::GetPlatformIO().Textures.push_back(tex);
+		// ImGui::UpdateTexturesEndFrame() clears and rebuilds PlatformIO.Textures from the font atlases
+		// and the registered user textures on every frame, so pushing into it directly was dropped again
+		// before the renderer backend ever saw the WantCreate request: the hero image stayed blank in
+		// Release builds and tripped the "ImDrawCmd is referring to ImTextureData that wasn't uploaded"
+		// assert in Debug. RegisterUserTexture() is the supported way in (imgui >= 1.92).
+		ImGui::RegisterUserTexture(tex);
 
 		out.ref = tex->GetTexRef();
 		out.w = w;
@@ -357,9 +385,19 @@ void CrossPlatformGUI::_drawStatusHeader()
 
 	if (this->_headphones.hasDualBattery())
 	{
-		ImGui::Text("Battery   L %d%%    R %d%%", this->_headphones.getBatteryLeft(), this->_headphones.getBatteryRight());
+		// An earbud that isn't reporting (docked in the case / powered down) reads -1; show a dash.
+		auto budText = [](int level, bool charging) {
+			char buf[32];
+			if (level < 0) snprintf(buf, sizeof(buf), "--");
+			else snprintf(buf, sizeof(buf), "%d%%%s", level, charging ? "+" : "");
+			return std::string(buf);
+		};
+		ImGui::Text("Battery   L %s    R %s",
+			budText(this->_headphones.getBatteryLeft(), this->_headphones.isBatteryLeftCharging()).c_str(),
+			budText(this->_headphones.getBatteryRight(), this->_headphones.isBatteryRightCharging()).c_str());
 		if (this->_headphones.getBatteryCase() >= 0)
-			ImGui::Text("Case      %d%%", this->_headphones.getBatteryCase());
+			ImGui::Text("Case      %d%%%s", this->_headphones.getBatteryCase(),
+				this->_headphones.isBatteryCaseCharging() ? "  (charging)" : "");
 	}
 	else
 	{
@@ -447,6 +485,9 @@ void CrossPlatformGUI::_drawEqualizer()
 		{
 			this->_uiEqPreset = presets[i].val;
 			int p = presets[i].val;
+			// setEqualizerPreset() re-reads the bands that go with the new preset (the device restores the
+			// stored custom curve for Manual), so pull them into the sliders once the command lands.
+			this->_eqBandsNeedSync = true;
 			this->_sendFeatureCommand([this, p]() { this->_headphones.setEqualizerPreset((EQ_PRESET)p); });
 		}
 		if (sel) ImGui::PopStyleColor();
@@ -462,9 +503,11 @@ void CrossPlatformGUI::_drawEqualizer()
 		for (int i = 0; i < 6; ++i)
 		{
 			std::string id = "##eqband" + std::to_string(i);
-			std::string fmt = std::string(bandNames[i]) + "   %d";
+			std::string fmt = std::string(bandNames[i]) + "   %+d";
 			ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
-			if (ImGui::SliderInt(id.c_str(), values[i], 0, 10, fmt.c_str()))
+			// Range is -10..+10 on the wire: Headphones::setEqualizerCustom() clamps to that and sends
+			// value+10, and requestEqualizer() decodes byte-10. A 0..10 slider could only ever boost.
+			if (ImGui::SliderInt(id.c_str(), values[i], -10, 10, fmt.c_str()))
 				changed = true;
 		}
 		if (changed)
@@ -565,6 +608,15 @@ void CrossPlatformGUI::_sendPendingASMChanges()
 		try { this->_featureCommandFuture.get(); }
 		catch (const RecoverableException& e) { if (e.shouldDisconnect) this->_bt.disconnect(); this->_mq.addMessage(e.what()); }
 		catch (const std::exception& e) { this->_mq.addMessage(e.what()); }
+
+		if (this->_eqBandsNeedSync)
+		{
+			this->_eqBandsNeedSync = false;
+			this->_uiEqPreset = (int)(unsigned char)this->_headphones.getEqualizerPreset();
+			for (int i = 0; i < 5; ++i)
+				this->_uiEqBands[i] = this->_headphones.getEqualizerBand(i);
+			this->_uiClearBass = this->_headphones.getClearBass();
+		}
 	}
 
 	if (this->_sendCommandFuture.valid() && this->_sendCommandFuture.ready())

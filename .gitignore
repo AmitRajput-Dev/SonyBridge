@@ -89,6 +89,7 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 pytestdebug.log
+*.actual
 
 # Translations
 *.mo
@@ -530,3 +531,5 @@ Client/imgui.ini
 
 # linux build
 Client/linux/sonyheadphonesclient.build/
+
+.superpowers/

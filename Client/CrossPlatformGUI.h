@@ -26,6 +26,9 @@ const auto WINDOW_COLOR = ImVec4(0.09f, 0.09f, 0.11f, 1.00f);
 
 // Physical-button changes (ASM) are polled roughly every two seconds so the app stays in sync.
 constexpr auto DYNAMIC_POLL_FRAMES = FPS * 2;
+// Battery moves slowly and each read costs a round trip, so it rides along with the ambient poll on a
+// much slower schedule instead of getting a request of its own.
+constexpr auto BATTERY_POLL_FRAMES = FPS * 30;
 
 class CrossPlatformGUI
 {
@@ -81,6 +84,7 @@ private:
 	bool _synced = false;
 	bool _probed = false;
 	int _pollCounter = 0;
+	int _batteryPollCounter = 0;
 
 	// UI state, synced from the device once after connect; user edits are pushed back to the headphones.
 	bool _uiAsmOn = false;
@@ -90,6 +94,9 @@ private:
 	int _uiEqPreset = 0;
 	std::array<int, 5> _uiEqBands = { 0, 0, 0, 0, 0 };
 	int _uiClearBass = 0;
+	// Set when a preset write is in flight, so the band sliders take the values the device reports for
+	// that preset once it completes instead of keeping the previous preset's.
+	bool _eqBandsNeedSync = false;
 	bool _uiDsee = false;
 	int _uiAutoPowerOff = 0;
 	bool _uiSpeakToChat = false;

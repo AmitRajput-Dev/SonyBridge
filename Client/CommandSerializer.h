@@ -7,7 +7,6 @@
 #include "Exceptions.h"
 
 constexpr int MINIMUM_VOICE_FOCUS_STEP = 2;
-constexpr unsigned int ASM_LEVEL_DISABLED = -1;
 
 namespace CommandSerializer
 {
@@ -37,10 +36,8 @@ namespace CommandSerializer
 
 	Message unpackBtMessage(const Buffer& src);
 
-	NC_DUAL_SINGLE_VALUE getDualSingleForAsmLevel(char asmLevel);
-	Buffer serializeNcAndAsmSetting(NC_ASM_EFFECT ncAsmEffect, NC_ASM_SETTING_TYPE ncAsmSettingType, ASM_SETTING_TYPE asmSettingType, ASM_ID asmId, char asmLevel);
+	Buffer serializeNcAndAsmSetting(NC_ASM_EFFECT ncAsmEffect, NC_ASM_SETTING_TYPE ncAsmSettingType, NC_DUAL_SINGLE_VALUE ncValue, ASM_SETTING_TYPE asmSettingType, ASM_ID asmId, char asmLevel);
 	//v2 protocol variant (WH-CH720N, XM5, newer XM4, etc) - different NCASM_SET_PARAM byte layout than v1.
 	Buffer serializeNcAndAsmSettingV2(NC_ASM_EFFECT ncAsmEffect, NC_ASM_SETTING_TYPE_V2 ncAsmSettingType, ASM_ID voicePassthrough, char asmLevel);
 	Buffer serializeVPTSetting(VPT_INQUIRED_TYPE type, unsigned char preset);
 }
-

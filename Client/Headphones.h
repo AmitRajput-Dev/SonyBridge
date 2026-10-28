@@ -3,6 +3,18 @@
 #include "Constants.h"
 
 #include <mutex>
+#include <string>
+#include <vector>
+
+// One entry of the headset's paired-device list (multipoint, v2 table 2).
+struct PairedDevice
+{
+	std::string address;    // "XX:XX:XX:XX:XX:XX", as the headset reports it
+	std::string name;       // may be empty
+	int slot = 0;           // multipoint slot: 0 = paired but not connected, 1/2 = connected
+	int classOfDevice = -1; // 24-bit Bluetooth class of device; -1 if not reported, 0xFFFFFF for paired-only
+	bool playback = false;  // currently holds the playback (A2DP) right
+};
 
 template <class T>
 struct Property {
@@ -34,30 +46,43 @@ public:
 	void setVptType(int val);
 	int getVptType();
 
-	// Handshake the device expects before it answers inquiry (GET) commands on the v2 protocol.
+	// Handshake the device expects before it answers inquiry (GET) commands.
 	void initDevice();
 
-	// Battery (v2 inquiry). getBatteryLevel() returns -1 until requestBattery() succeeds.
+	// Model name of the connected device (e.g. "WF-1000XM5"). Only a hint: it picks which battery
+	// layout to probe first, so set it before the first requestBattery() to save a timed-out inquiry.
+	void setDeviceName(const std::string& name);
+
+	// Battery. getBatteryLevel() returns -1 until requestBattery() succeeds.
 	// For TWS earbuds requestBattery() also fills the per-earbud + case levels (hasDualBattery()).
 	void requestBattery();
-	int getBatteryLevel();
+	bool hasBattery();
+	int getBatteryLevel();       // for earbuds: the emptier of the two
 	bool isBatteryCharging();
 	bool hasDualBattery();
 	int getBatteryLeft();   // -1 if n/a
 	int getBatteryRight();
 	int getBatteryCase();
+	bool isBatteryLeftCharging();
+	bool isBatteryRightCharging();
+	bool isBatteryCaseCharging();
 
-	// Equalizer (v2). requestEqualizer() reads current state; setEqualizerPreset() pushes a preset immediately.
+	// Equalizer. Wire subtypes and the custom-preset byte differ between protocol generations.
 	void requestEqualizer();
+	bool hasEqualizer();
 	EQ_PRESET getEqualizerPreset();
 	void setEqualizerPreset(EQ_PRESET preset);
-	// Custom (manual) EQ: 5 band values + clear bass, each in [-10, 10]. Selects the MANUAL preset.
+	// Custom (manual) EQ. Selects the MANUAL preset. Standard layout: 5 bands + clear bass, each in [-10, 10].
+	// Ten-band layout (WH-1000XM6): 10 raw device steps in [0, 12], no clear bass (ignored).
 	void setEqualizerCustom(int clearBass, const std::vector<int>& bands);
 	int getClearBass();
-	int getEqualizerBand(int index); // 0..4
+	int getEqualizerBand(int index);
+	int getEqualizerBandCount();
+	bool isTenBandEqualizer();
 
-	// DSEE / audio upsampling (v2).
+	// DSEE / audio upsampling.
 	void requestDsee();
+	bool hasDsee();
 	bool getDsee();
 	void setDsee(bool enabled);
 
@@ -86,31 +111,86 @@ public:
 	bool getAdaptiveVolume();
 	void setAdaptiveVolume(bool enabled);
 
+	// Multipoint (v2). requestMultipoint() sends only GETs, and the table 2 reads only when initDevice()'s reply
+	// says the device has command table 2. Each piece is exposed only if the device answered it.
+	void requestMultipoint();
+	bool hasPairedDevices();
+	std::vector<PairedDevice> getPairedDevices();
+	bool hasPlaybackPinState();
+	bool isPlaybackPinned();
+	bool hasMultipointSetting();
+	bool getMultipointEnabled();
+	// Hex log of the init reply and every multipoint request/reply from the last requestMultipoint(),
+	// for bringing the protocol up on models nobody has captured yet.
+	std::string getMultipointDiagnostics();
+
+	// Multipoint writes. Each sends exactly one command and returns a V2Table2Command::RESULT_* code. They
+	// throw RecoverableException (without sending) unless requestMultipoint() saw the device advertise
+	// source-switch control. Call requestMultipoint() afterwards to read back the real state.
+	// switchPlaybackDevice: the address must be a connected device from the last device list.
+	int switchPlaybackDevice(const std::string& address);
+	int setPlaybackPinned(bool pinned);
+	// "Connect to 2 devices". The setting is device-persistent, so the app never enforces a default. Throws
+	// (without sending) unless requestMultipoint() found the MULTIPOINT_SETTING general-settings slot.
+	void setMultipoint(bool enabled);
+
 	bool isChanged();
 	void setChanges();
+
+	// Rolls a failed ambient/NC write back to the last known device state. Must be called when
+	// setChanges() throws - see the comment on the definition.
+	void discardAmbientChanges();
 private:
-	Property<bool> _ambientSoundControl = { 0 };
-	Property<bool> _focusOnVoice = { 0 };
-	Property<int> _asmLevel = { 0 };
+	Property<bool> _ambientSoundControl = { false, false };
+	Property<bool> _focusOnVoice = { false, false };
+	Property<int> _asmLevel = { 0, 0 };
+	NC_ASM_SETTING_TYPE _ncAsmSettingType = NC_ASM_SETTING_TYPE::DUAL_SINGLE_OFF;
+	ASM_SETTING_TYPE _asmSettingType = ASM_SETTING_TYPE::LEVEL_ADJUSTMENT;
 	Property<SOUND_POSITION_PRESET> _surroundPosition = { SOUND_POSITION_PRESET::OUT_OF_RANGE, SOUND_POSITION_PRESET::OFF };
-	Property<int> _vptType = { 0 };
+	Property<int> _vptType = { 0, 0 };
 
 	int _batteryLevel = -1;
+	bool _hasBattery = false;
 	bool _batteryCharging = false;
 	bool _hasDualBattery = false;
 	int _batteryLeft = -1;
 	int _batteryRight = -1;
 	int _batteryCase = -1;
+	bool _batteryLeftCharging = false;
+	bool _batteryRightCharging = false;
+	bool _batteryCaseCharging = false;
+	std::string _deviceName;
+
+	bool _looksLikeEarbuds() const;
+	// The WH-1000XM6 speaks a different layout for two v2 commands: noise-control state is read via inquired
+	// type 0x19 (0x17 answers all zeros), and the equalizer uses inquired type 0x04 with 10 raw bands.
+	bool _isWh1000Xm6() const;
+	// Both return false if the device didn't answer that battery sub-type.
+	bool _requestDualBattery(unsigned char subType);
+	bool _requestSingleBattery(unsigned char subType, int& levelOut, bool& chargingOut);
 	EQ_PRESET _eqPreset = EQ_PRESET::OFF;
+	bool _hasEqualizer = false;
 	std::vector<int> _eqBands = { 0, 0, 0, 0, 0 };
 	int _eqClearBass = 0;
 	bool _dsee = false;
+	bool _hasDsee = false;
 
 	bool _hasAutoPowerOff = false; int _autoPowerOff = 0;
 	bool _hasFirmware = false; std::string _firmware;
 	bool _hasCodec = false; std::string _codec;
 	bool _hasSpeakToChat = false; bool _speakToChat = false;
 	bool _hasAdaptiveVolume = false; bool _adaptiveVolume = false;
+
+	Buffer _initReply;
+	bool _table2Supported = false;
+	bool _table2FunctionsRead = false; std::vector<unsigned char> _table2Functions;
+	bool _hasPairedDevices = false; std::vector<PairedDevice> _pairedDevices;
+	bool _hasPlaybackPinState = false; bool _playbackPinned = false;
+	bool _multipointSlotSearched = false; int _multipointSlot = -1;
+	bool _hasMultipointSetting = false; bool _multipointEnabled = false;
+	std::string _multipointDiscoveryLog;
+	std::string _multipointWriteLog;
+	std::string _multipointDiagnostics;
 
 	std::mutex _propertyMtx;
 
