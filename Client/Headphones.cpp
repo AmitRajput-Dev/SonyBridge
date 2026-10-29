@@ -573,7 +573,9 @@ void Headphones::probeCapabilities()
 
 		try {
 			auto r = this->_conn.sendCommandAndReadResponse({ (char)V1Command::BTNMODE_GET, (char)V1Command::SUB_SPEAK_TO_CHAT }, V1Command::BTNMODE_RET, V1Command::SUB_SPEAK_TO_CHAT);
-			if (r.size() >= 4 && r[2] == 0x01) { std::lock_guard g(this->_propertyMtx); this->_speakToChat = r[3] != 0; this->_hasSpeakToChat = true; }
+			// f7 05 <kind> <on>. A WH-1000XM4 on fw 3.0.1 answers this GET with kind 00 (f7 05 00 01 when on)
+			// and uses kind 01 only in its change notifications (f9 05 01 01), so accept either.
+			if (r.size() >= 4 && (r[2] == 0x00 || r[2] == 0x01)) { std::lock_guard g(this->_propertyMtx); this->_speakToChat = r[3] != 0; this->_hasSpeakToChat = true; }
 		} catch (...) {}
 		return;
 	}
@@ -716,7 +718,11 @@ namespace
 
 void Headphones::requestMultipoint()
 {
-	if (this->_conn.getProtocolVersion() != SonyProtocolVersion::V2) return;
+	if (this->_conn.getProtocolVersion() == SonyProtocolVersion::V1)
+	{
+		this->_requestGeneralSettingsV1();
+		return;
+	}
 
 	Buffer initReply;
 	bool table2Supported;
@@ -936,6 +942,87 @@ bool Headphones::hasPlaybackPinState() { std::lock_guard g(this->_propertyMtx); 
 bool Headphones::isPlaybackPinned() { std::lock_guard g(this->_propertyMtx); return this->_playbackPinned; }
 bool Headphones::hasMultipointSetting() { std::lock_guard g(this->_propertyMtx); return this->_hasMultipointSetting; }
 bool Headphones::getMultipointEnabled() { std::lock_guard g(this->_propertyMtx); return this->_multipointEnabled; }
+
+// The v1 general settings have no device list or playback pin (those are v2 table 2); only the settings
+// slots, found by name once per connection from the function list, then just read.
+void Headphones::_requestGeneralSettingsV1()
+{
+	bool searched; int multipointSlot; int touchPanelSlot;
+	{
+		std::lock_guard guard(this->_propertyMtx);
+		searched = this->_multipointSlotSearched;
+		multipointSlot = this->_multipointSlot;
+		touchPanelSlot = this->_touchPanelSlot;
+	}
+
+	if (!searched)
+	{
+		try {
+			auto functions = this->_conn.sendCommandAndReadResponse({ (char)V1Command::SUPPORT_FUNCTION_GET, 0x00 },
+				V1Command::SUPPORT_FUNCTION_RET, 0x00);
+			size_t end = functions.size() >= 3 ? std::min(functions.size(), (size_t)3 + (unsigned char)functions[2]) : 0;
+			for (size_t i = 3; i < end; i++)
+			{
+				auto slot = (unsigned char)functions[i];
+				if (slot < V1Command::GS_SLOT_FIRST || slot > V1Command::GS_SLOT_LAST) continue;
+				try {
+					auto resp = this->_conn.sendCommandAndReadResponse(
+						{ (char)V1Command::GS_GET_CAPABILITY, (char)slot, (char)V1Command::GS_DISPLAY_LANGUAGE_ENGLISH },
+						V1Command::GS_RET_CAPABILITY, slot);
+					if (resp.size() < 4 || (unsigned char)resp[2] != V1Command::GS_TYPE_BOOLEAN) continue;
+					size_t nameLength = (unsigned char)resp[3];
+					if (4 + nameLength > resp.size()) continue;
+					std::string name(resp.begin() + 4, resp.begin() + 4 + nameLength);
+					if (name == "MULTIPOINT_SETTING") multipointSlot = slot;
+					else if (name == "TOUCH_PANEL_SETTING") touchPanelSlot = slot;
+				} catch (...) {}
+			}
+		} catch (...) {}
+	}
+
+	// d7 <slot> 01 <01=on/00=off>; anything else leaves the setting unconfirmed (hidden).
+	auto read = [this](int slot, bool& has, bool& enabled) {
+		has = false; enabled = false;
+		if (slot < 0) return;
+		try {
+			auto resp = this->_conn.sendCommandAndReadResponse({ (char)V1Command::GS_GET_PARAM, (char)slot },
+				V1Command::GS_RET_PARAM, slot);
+			if (resp.size() >= 4 && (unsigned char)resp[2] == V1Command::GS_PARAM_BOOLEAN && (unsigned char)resp[3] <= 1)
+			{
+				has = true;
+				enabled = resp[3] == 0x01;
+			}
+		} catch (...) {}
+	};
+	bool hasMultipoint, multipointEnabled, hasTouchPanel, touchPanelEnabled;
+	read(multipointSlot, hasMultipoint, multipointEnabled);
+	read(touchPanelSlot, hasTouchPanel, touchPanelEnabled);
+
+	std::lock_guard guard(this->_propertyMtx);
+	this->_multipointSlotSearched = true;
+	this->_multipointSlot = multipointSlot;
+	this->_touchPanelSlot = touchPanelSlot;
+	this->_hasMultipointSetting = hasMultipoint;
+	this->_multipointEnabled = multipointEnabled;
+	this->_hasTouchPanelSetting = hasTouchPanel;
+	this->_touchPanelEnabled = touchPanelEnabled;
+}
+
+bool Headphones::hasTouchPanelSetting() { std::lock_guard g(this->_propertyMtx); return this->_hasTouchPanelSetting; }
+bool Headphones::getTouchPanelEnabled() { std::lock_guard g(this->_propertyMtx); return this->_touchPanelEnabled; }
+
+void Headphones::setTouchPanel(bool enabled)
+{
+	int slot;
+	{
+		std::lock_guard guard(this->_propertyMtx);
+		if (!this->_hasTouchPanelSetting) throw RecoverableException("This headset doesn't report a touch controls setting.");
+		slot = this->_touchPanelSlot;
+	}
+	this->_conn.sendCommand({ (char)V1Command::GS_SET_PARAM, (char)slot, (char)V1Command::GS_PARAM_BOOLEAN, (char)(enabled ? 0x01 : 0x00) });
+	std::lock_guard guard(this->_propertyMtx);
+	this->_touchPanelEnabled = enabled;
+}
 std::string Headphones::getMultipointDiagnostics() { std::lock_guard g(this->_propertyMtx); return this->_multipointDiagnostics; }
 
 void Headphones::setMultipoint(bool enabled)
@@ -945,6 +1032,38 @@ void Headphones::setMultipoint(bool enabled)
 		std::lock_guard guard(this->_propertyMtx);
 		if (!this->_hasMultipointSetting) throw RecoverableException("This headset doesn't report a multipoint setting.");
 		slot = this->_multipointSlot;
+	}
+	if (this->_conn.getProtocolVersion() == SonyProtocolVersion::V1)
+	{
+		// Applying this restarts the headset, so it acknowledges the write and then asks for confirmation
+		// (99 01 06/07 <action>), holding the change until answered. Only a multipoint alert is answered.
+		// It asks only once alerts are enabled (94 01 00), which is sent here rather than on every connect
+		// so no other confirmation prompts, which nothing here answers, get switched on.
+		this->_conn.sendCommand({ (char)V1Command::ALERT_SET_STATUS, (char)V1Command::ALERT_FORMAT_FIXED, (char)V1Command::ALERT_STATUS_ENABLE });
+		Buffer alert;
+		try {
+			alert = this->_conn.sendCommandAndReadResponse(
+				{ (char)V1Command::GS_SET_PARAM, (char)slot, (char)V1Command::GS_PARAM_BOOLEAN, (char)(enabled ? 0x01 : 0x00) },
+				V1Command::ALERT_NTFY, V1Command::ALERT_FORMAT_FIXED);
+		} catch (...) {}
+		if (alert.size() >= 4 && ((unsigned char)alert[2] == V1Command::ALERT_MULTIPOINT_ON || (unsigned char)alert[2] == V1Command::ALERT_MULTIPOINT_OFF)
+			&& ((unsigned char)alert[3] == 0x01 || (unsigned char)alert[3] == 0x02))
+		{
+			this->_conn.sendCommand({ (char)V1Command::ALERT_SET, (char)V1Command::ALERT_FORMAT_FIXED, alert[2], (char)V1Command::ALERT_ACTION_POSITIVE });
+			std::lock_guard guard(this->_propertyMtx);
+			this->_multipointEnabled = enabled;
+			return;
+		}
+		// No confirmation asked: read back what the device kept. A WH-1000XM4 on fw 3.0.1 answers d8 d2 01 00
+		// with d9 d2 01 01 (still on) and no alert, i.e. it declines the change.
+		auto resp = this->_conn.sendCommandAndReadResponse({ (char)V1Command::GS_GET_PARAM, (char)slot }, V1Command::GS_RET_PARAM, slot);
+		bool kept = resp.size() >= 4 && resp[3] == 0x01;
+		{
+			std::lock_guard guard(this->_propertyMtx);
+			this->_multipointEnabled = kept;
+		}
+		if (kept != enabled) throw RecoverableException("The headphones didn't accept the change.");
+		return;
 	}
 	// The state frame goes first (d8 <slot> 00 <00=on/01=off>), then the fixed apply commit 98 00 06 01.
 	// sendCommand waits for each ACK, which reproduces GadgetBridge's frame/ack interleaving.

@@ -3,53 +3,37 @@ name: macOS
 on:
   push:
     branches:
-    - master
+    - main
+    - 'feature/**'
   pull_request:
     branches:
-    - master
+    - main
+  workflow_dispatch:
 
 jobs:
   build:
-    strategy:
-      matrix:
-        os: ["macos-latest"]
-        include:
-          - os: macos-latest
-            binary_path: Client/build/SonyHeadphonesClient.zip
-            artifact_name: "SonyHeadphonesClient-macOS.zip"
-    runs-on: ${{ matrix.os }}
+    runs-on: macos-latest
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
       with:
         submodules: true
 
-    - name: Create build directory
+    - name: Protocol tests
       working-directory: ${{github.workspace}}/Client
-      run: mkdir build
+      run: sh tests/run-macos.sh
 
     - name: Build
-      working-directory: ${{github.workspace}}/Client/build
-      # Execute the build.
-      run: xcodebuild -project '../macos/SonyHeadphonesClient.xcodeproj' -config Release -scheme 'SonyHeadphonesClient' -archivePath ./archive archive | xcpretty
+      working-directory: ${{github.workspace}}/Client/macos
+      # Ad-hoc signed like the released app, so no signing identity is needed.
+      run: xcodebuild -project SonyHeadphonesClient.xcodeproj -scheme SonyHeadphonesClient -configuration Release -derivedDataPath ../build CODE_SIGN_IDENTITY=- build
 
-    - name: Export archive to .app
-      working-directory: ${{github.workspace}}/Client/build
-      # Exports the archive to a .app file
-      run: xcodebuild -exportArchive -archivePath ./archive.xcarchive -exportPath ./ -exportOptionsPlist ../macos/exportOptions.plist | xcpretty
+    - name: Zip the app
+      working-directory: ${{github.workspace}}/Client/build/Build/Products/Release
+      run: ditto -c -k --keepParent SonyHeadphonesClient.app ${{github.workspace}}/SonyHeadphonesClient-macOS.zip
 
-    - name: Zip the exported file
-      working-directory: ${{github.workspace}}/Client/build
-      # Zip the application for easier downloading
-      run: zip -r SonyHeadphonesClient.zip SonyHeadphonesClient.app
-
-    - name: Upload the zipped application
-      uses: actions/upload-artifact@v3
+    - name: Upload the zipped app
+      uses: actions/upload-artifact@v4
       with:
-        # Artifact name
-        name: ${{ matrix.artifact_name }}
-        # A file, directory or wildcard pattern that describes what to upload
-        path: ${{github.workspace}}/${{matrix.binary_path}}
-        # The desired behavior if no files are found using the provided path.
-
-
+        name: SonyHeadphonesClient-macOS
+        path: ${{github.workspace}}/SonyHeadphonesClient-macOS.zip

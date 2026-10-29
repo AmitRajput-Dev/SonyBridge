@@ -35,6 +35,14 @@ enum AppTheme: String, CaseIterable, Identifiable {
         NSApp.appearance = colorScheme == .dark ? NSAppearance(named: .darkAqua) : nil
     }
 
+    // The concrete appearance for views that don't inherit the app's (the menu-bar panel): dark for the
+    // dark-only themes, the system's current light/dark for Native Glass.
+    var resolvedAppearance: NSAppearance? {
+        if colorScheme == .dark { return NSAppearance(named: .darkAqua) }
+        let systemIsDark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        return NSAppearance(named: systemIsDark ? .darkAqua : .aqua)
+    }
+
     // Sony Signature changes shapes as well as colors: pill buttons, uppercase tracked labels,
     // monospaced numbers, EQ as bars and rings behind the product.
     var isSignature: Bool { self == .sonySignature }
@@ -298,65 +306,210 @@ struct HeroBackdrop: View {
     }
 }
 
-// Small picture of the EQ: a filled curve, or bars in Sony Signature. `range` is the band value range.
-struct EQPreview: View {
+// Interactive EQ graph. The bands are evenly spaced on a log-frequency axis (400 Hz-16 kHz in 2.5x steps,
+// or octaves on the ten-band layout), so even spacing is their true position. One EQGeometry maps
+// band/value to a point and back, and the curve, nodes, labels and drag all go through it, so they line
+// up exactly. Click or drag anywhere in a band's column to set it; values snap to whole device steps.
+// Drawn as a curve, or as bars in Sony Signature.
+struct EQEditor: View {
     let bands: [Int]
-    let range: ClosedRange<Double>
+    let labels: [String]
+    let range: ClosedRange<Int>
+    let signed: Bool                    // dB values (-10...10); the ten-band layout's raw 0...12 steps are unsigned
+    var plotHeight: CGFloat = 150
+    let set: (_ band: Int, _ value: Int) -> Void
+
+    @State private var dragging: Int?
 
     @Environment(\.appTheme) private var theme
     @Environment(\.colorScheme) private var colorScheme
 
+    private let axisWidth: CGFloat = 26
+    private let labelsHeight: CGFloat = 34
+
     var body: some View {
-        let accent = theme.palette(colorScheme).accent
-        let span = range.upperBound - range.lowerBound
-        let levels = bands.map { min(max((Double($0) - range.lowerBound) / span, 0), 1) }
-        Group {
-            if theme.isSignature {
-                HStack(alignment: .bottom, spacing: 6) {
-                    ForEach(levels.indices, id: \.self) { i in
-                        RoundedRectangle(cornerRadius: 4, style: .continuous)
-                            .fill(accent.opacity(0.5 + 0.4 * levels[i]))
-                            .frame(maxWidth: 34)
-                            .frame(height: 6 + 48 * levels[i])
-                            .frame(maxWidth: .infinity)
-                    }
+        let palette = theme.palette(colorScheme)
+        GeometryReader { proxy in
+            let geo = EQGeometry(plot: CGRect(x: axisWidth, y: 0, width: proxy.size.width - axisWidth, height: plotHeight),
+                                 count: bands.count, range: range)
+            ZStack(alignment: .topLeading) {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(palette.track)
+                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(palette.cardStroke, lineWidth: 1))
+                    .frame(width: geo.plot.width, height: geo.plot.height)
+                    .offset(x: geo.plot.minX)
+
+                grid(geo, palette)
+                trace(geo, palette)
+
+                ForEach(bands.indices, id: \.self) { i in
+                    node(i, geo, palette)
                 }
-            } else {
-                ZStack {
-                    EQCurve(levels: levels, closed: true).fill(accent.opacity(0.15))
-                    EQCurve(levels: levels, closed: false)
-                        .stroke(accent, style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
+
+                // Frequency under each node, its value under that.
+                ForEach(bands.indices, id: \.self) { i in
+                    VStack(spacing: 2) {
+                        Text(i < labels.count ? labels[i] : "")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(palette.secondary)
+                        Text(valueText(bands[i]))
+                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .foregroundColor(dragging == i ? palette.accentText : palette.primary)
+                    }
+                    .fixedSize()
+                    .position(x: geo.x(i), y: plotHeight + labelsHeight / 2 + 2)
                 }
             }
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 0)
+                .onChanged { drag in
+                    let band = dragging ?? geo.band(atX: drag.startLocation.x)
+                    dragging = band
+                    let value = geo.value(atY: drag.location.y)
+                    if band < bands.count && value != bands[band] { set(band, value) }
+                }
+                .onEnded { _ in dragging = nil })
         }
-        .frame(height: 54, alignment: .bottom)
+        .frame(height: plotHeight + labelsHeight)
+    }
+
+    private var gridValues: [Int] {
+        let quarter = (range.upperBound - range.lowerBound) / 4
+        return (0...4).map { range.lowerBound + $0 * quarter }
+    }
+
+    private func valueText(_ value: Int) -> String {
+        signed && value > 0 ? "+\(value)" : "\(value)"
+    }
+
+    private func grid(_ geo: EQGeometry, _ palette: Palette) -> some View {
+        ZStack(alignment: .topLeading) {
+            ForEach(gridValues, id: \.self) { value in
+                let zero = signed && value == 0
+                Path { p in
+                    p.move(to: CGPoint(x: geo.plot.minX, y: geo.y(value)))
+                    p.addLine(to: CGPoint(x: geo.plot.maxX, y: geo.y(value)))
+                }
+                .stroke(palette.secondary.opacity(zero ? 0.45 : 0.18),
+                        style: StrokeStyle(lineWidth: 1, dash: zero ? [] : [3, 3]))
+                Text(valueText(value))
+                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    .foregroundColor(palette.secondary)
+                    .fixedSize()
+                    .position(x: axisWidth / 2 - 2, y: geo.y(value))
+            }
+            ForEach(bands.indices, id: \.self) { i in
+                Path { p in
+                    p.move(to: CGPoint(x: geo.x(i), y: geo.plot.minY + 6))
+                    p.addLine(to: CGPoint(x: geo.x(i), y: geo.plot.maxY - 6))
+                }
+                .stroke(palette.secondary.opacity(dragging == i ? 0.35 : 0.1), lineWidth: 1)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func trace(_ geo: EQGeometry, _ palette: Palette) -> some View {
+        // Fill toward 0 dB, or the bottom for the unsigned raw steps.
+        let base = signed ? 0 : range.lowerBound
+        if theme.isSignature {
+            ForEach(bands.indices, id: \.self) { i in
+                let top = min(geo.y(bands[i]), geo.y(base))
+                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                    .fill(palette.accent.opacity(dragging == i ? 0.6 : 0.35))
+                    .frame(width: 10, height: max(abs(geo.y(bands[i]) - geo.y(base)), 2))
+                    .position(x: geo.x(i), y: top + max(abs(geo.y(bands[i]) - geo.y(base)), 2) / 2)
+            }
+        } else {
+            geo.curve(bands, fillTo: base).fill(palette.accent.opacity(0.15))
+            geo.curve(bands, fillTo: nil)
+                .stroke(palette.accent, style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
+        }
+    }
+
+    private func node(_ i: Int, _ geo: EQGeometry, _ palette: Palette) -> some View {
+        let active = dragging == i
+        let size: CGFloat = active ? 16 : 12
+        return ZStack {
+            Circle()
+                .fill(palette.accent)
+                .overlay(Circle().strokeBorder(palette.onAccent, lineWidth: 2))
+                .frame(width: size, height: size)
+                .shadow(color: palette.accent.opacity(active ? 0.5 : 0), radius: 6)
+            if active {
+                Text(valueText(bands[i]))
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundColor(palette.onAccent)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(palette.accent, in: Capsule())
+                    .fixedSize()
+                    .offset(y: geo.y(bands[i]) - geo.plot.minY < 34 ? 22 : -22)
+            }
+        }
+        .position(x: geo.x(i), y: geo.y(bands[i]))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(i < labels.count ? "\(labels[i]) Hz" : "Band \(i + 1)")
+        .accessibilityValue(signed ? "\(valueText(bands[i])) dB" : valueText(bands[i]))
+        .accessibilityAdjustableAction { direction in
+            let step = direction == .increment ? 1 : -1
+            let value = min(max(bands[i] + step, range.lowerBound), range.upperBound)
+            if value != bands[i] { set(i, value) }
+        }
     }
 }
 
-// Levels are 0...1, spread evenly left to right. Horizontal tangents at each band keep the curve
-// from overshooting between them.
-private struct EQCurve: Shape {
-    let levels: [Double]
-    let closed: Bool
+// Band index/value <-> point in the plot. Nodes are inset so ones at the ends or the limits aren't clipped.
+private struct EQGeometry {
+    let plot: CGRect
+    let count: Int
+    let range: ClosedRange<Int>
 
-    func path(in rect: CGRect) -> Path {
+    private let sideInset: CGFloat = 16
+    private let topBottomInset: CGFloat = 12
+
+    private var span: Double { Double(range.upperBound - range.lowerBound) }
+    private var usableHeight: CGFloat { plot.height - 2 * topBottomInset }
+
+    func x(_ band: Int) -> CGFloat {
+        guard count > 1 else { return plot.midX }
+        return plot.minX + sideInset + CGFloat(band) * (plot.width - 2 * sideInset) / CGFloat(count - 1)
+    }
+
+    func y(_ value: Int) -> CGFloat {
+        let t = (Double(value) - Double(range.lowerBound)) / span
+        return plot.maxY - topBottomInset - CGFloat(t) * usableHeight
+    }
+
+    func value(atY y: CGFloat) -> Int {
+        let t = Double((plot.maxY - topBottomInset - y) / usableHeight)
+        let value = Int((Double(range.lowerBound) + t * span).rounded())
+        return min(max(value, range.lowerBound), range.upperBound)
+    }
+
+    func band(atX x: CGFloat) -> Int {
+        guard count > 1 else { return 0 }
+        let step = (plot.width - 2 * sideInset) / CGFloat(count - 1)
+        return min(max(Int(((x - plot.minX - sideInset) / step).rounded()), 0), count - 1)
+    }
+
+    // Through every node, flat out to the plot's edges. Horizontal tangents at each node keep the curve
+    // from overshooting between bands, so it never shows a level no band is set to.
+    func curve(_ bands: [Int], fillTo base: Int?) -> Path {
         var path = Path()
-        let levels = self.levels.count == 1 ? self.levels + self.levels : self.levels
-        guard levels.count > 1 else { return path }
-        let inset: CGFloat = 3
-        let step = rect.width / CGFloat(levels.count - 1)
-        let points = levels.enumerated().map { i, level in
-            CGPoint(x: rect.minX + CGFloat(i) * step,
-                    y: rect.maxY - inset - CGFloat(level) * (rect.height - 2 * inset))
-        }
-        path.move(to: points[0])
+        guard !bands.isEmpty else { return path }
+        let points = bands.indices.map { CGPoint(x: x($0), y: y(bands[$0])) }
+        path.move(to: CGPoint(x: plot.minX + 1, y: points[0].y))
+        path.addLine(to: points[0])
         for (from, to) in zip(points, points.dropFirst()) {
             let midX = (from.x + to.x) / 2
             path.addCurve(to: to, control1: CGPoint(x: midX, y: from.y), control2: CGPoint(x: midX, y: to.y))
         }
-        if closed {
-            path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
-            path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: plot.maxX - 1, y: points[points.count - 1].y))
+        if let base = base {
+            path.addLine(to: CGPoint(x: plot.maxX - 1, y: y(base)))
+            path.addLine(to: CGPoint(x: plot.minX + 1, y: y(base)))
             path.closeSubpath()
         }
         return path

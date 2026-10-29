@@ -28,6 +28,8 @@ final class HeadphonesModel: ObservableObject {
 
     @Published var connected = false
     @Published var connecting = false
+    // A paired Sony headset is connected to the Mac (audio), whether or not this app's control link is up.
+    @Published var headsetConnectedToMac = false
     @Published var deviceName = ""
     @Published var supportsVpt = false
     @Published var maxAmbientLevel = 20
@@ -78,6 +80,8 @@ final class HeadphonesModel: ObservableObject {
     // toggle just mirrors the on-device state.
     @Published var hasMultipointSetting = false
     @Published var multipointEnabled = false
+    @Published var hasTouchPanelSetting = false
+    @Published var touchPanelEnabled = false
     @Published var multipointDiagnostics = ""
     @Published var refreshingMultipoint = false
     @Published var multipointBusy = false
@@ -106,6 +110,38 @@ final class HeadphonesModel: ObservableObject {
     // confirmed, so the off-on-connect enforcement fires at most once per connection.
     private var s2cAutoDisablePending = false
 
+    // Set while a multipoint change may restart the headset: a link drop before it then reconnects.
+    private var restartReconnectDeadline: Date?
+
+    // Set by a manual disconnect so auto-connect leaves the headset alone until it next connects to the Mac.
+    private var autoConnectSuppressed = false
+    private var headsetTimer: Timer?
+
+    // Connects on launch and whenever a Sony headset connects to the Mac, never through the device picker.
+    // An idle link drop (headset still connected to the Mac) isn't retried: nothing new connected.
+    func startAutoConnect() {
+        headsetConnectedToMac = bridge.hasConnectedSonyHeadset
+        // macOS notifies connects but not disconnects, so poll for the Mac-level connection (cheap: paired
+        // devices plus cached SDP records). The menu-bar icon hides on it.
+        headsetTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { [weak self] _ in
+            guard let self = self else { return }
+            self.assignIfChanged(\.headsetConnectedToMac, self.bridge.hasConnectedSonyHeadset)
+        }
+        bridge.watchForHeadsetConnections { [weak self] in
+            guard let self = self else { return }
+            self.headsetConnectedToMac = true
+            self.autoConnectSuppressed = false
+            // The headset's control service isn't ready the moment the Mac sees it connect.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { self.autoConnectIfIdle() }
+        }
+        autoConnectIfIdle()
+    }
+
+    private func autoConnectIfIdle() {
+        guard !connected, !connecting, !autoConnectSuppressed, bridge.hasConnectedSonyHeadset else { return }
+        connect()
+    }
+
     func connect() {
         connecting = true
         errorMessage = nil
@@ -114,6 +150,7 @@ final class HeadphonesModel: ObservableObject {
             self.bridge.scanAndConnect { ok, error in
                 self.connecting = false
                 if ok {
+                    self.restartReconnectDeadline = nil
                     self.s2cAutoDisablePending = true
                     self.syncFromBridge()
                     self.startWatchingConnection()
@@ -195,6 +232,8 @@ final class HeadphonesModel: ObservableObject {
         playbackPinned = bridge.playbackPinned
         hasMultipointSetting = bridge.hasMultipointSetting
         multipointEnabled = bridge.multipointEnabled
+        hasTouchPanelSetting = bridge.hasTouchPanelSetting
+        touchPanelEnabled = bridge.touchPanelEnabled
         multipointDiagnostics = bridge.multipointDiagnostics
     }
 
@@ -235,7 +274,36 @@ final class HeadphonesModel: ObservableObject {
     func setMultipoint(_ on: Bool) {
         multipointEnabled = on
         errorMessage = nil
-        bridge.setMultipoint(on) { ok, error in if !ok, let e = error { self.errorMessage = e } }
+        // Applying it restarts the headset (XM4 at least), which drops this link; reconnect once it's back.
+        restartReconnectDeadline = Date().addingTimeInterval(90)
+        bridge.setMultipoint(on) { ok, error in
+            if !ok {
+                self.restartReconnectDeadline = nil
+                // Show what the headset actually kept rather than the value just requested.
+                self.multipointEnabled = self.bridge.multipointEnabled
+                if let e = error { self.errorMessage = e }
+            }
+        }
+    }
+
+    func setTouchPanel(_ on: Bool) {
+        touchPanelEnabled = on
+        errorMessage = nil
+        bridge.setTouchPanel(on) { ok, error in if !ok, let e = error { self.errorMessage = e } }
+    }
+
+    // Retries connect() every few seconds while a headset restart (after a multipoint change) is expected.
+    private func reconnectAfterRestart() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in
+            guard let self = self, !self.connected, let deadline = self.restartReconnectDeadline else { return }
+            guard Date() < deadline else {
+                self.restartReconnectDeadline = nil
+                self.errorMessage = "Headphones didn't come back after restarting. Connect them again."
+                return
+            }
+            if !self.connecting { self.connect() }
+            self.reconnectAfterRestart()
+        }
     }
 
     // Every @Published setter fires objectWillChange — and a full ContentView body
@@ -343,6 +411,8 @@ final class HeadphonesModel: ObservableObject {
         pendingPush = nil
         pendingEq = nil
         s2cAutoDisablePending = false
+        restartReconnectDeadline = nil
+        autoConnectSuppressed = true
         bridge.disconnect()
         connected = false
         deviceName = ""
@@ -365,6 +435,10 @@ final class HeadphonesModel: ObservableObject {
                 // linger with Fix/Switch enabled.
                 self.bridge.disconnect()
                 self.syncMultipointFromBridge()
+                if let deadline = self.restartReconnectDeadline, Date() < deadline {
+                    self.errorMessage = "Headphones restarting…"
+                    self.reconnectAfterRestart()
+                }
             }
         }
     }
