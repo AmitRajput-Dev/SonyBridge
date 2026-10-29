@@ -18,6 +18,7 @@ import SwiftUI
     private let menu = NSMenu()
     private let popover = NSPopover()
     private var cancellables = Set<AnyCancellable>()
+    private var appearanceObservation: NSKeyValueObservation?
 
     @objc static func install() {
         guard instance == nil else { return }
@@ -47,6 +48,10 @@ import SwiftUI
         model.objectWillChange
             .sink { [weak self] _ in DispatchQueue.main.async { self?.updateIcon() } }
             .store(in: &cancellables)
+        // Follow a light/dark switch made while the panel is open.
+        appearanceObservation = NSApp.observe(\.effectiveAppearance) { [weak self] _, _ in
+            DispatchQueue.main.async { self?.updatePopoverAppearance() }
+        }
     }
 
     @objc private func statusItemClicked(_ sender: NSStatusBarButton) {
@@ -61,6 +66,7 @@ import SwiftUI
             popover.performClose(nil)
         } else {
             refreshMultipointIfIdle()
+            updatePopoverAppearance()
             if let panel = popover.contentViewController, #unavailable(macOS 13.0) {
                 popover.contentSize = panel.view.fittingSize
             }
@@ -69,9 +75,24 @@ import SwiftUI
         }
     }
 
-    static func openMainWindow() {
+    // The storyboard window isn't shown at launch (menu-bar app); it's made on first open and kept, since
+    // it isn't released when closed.
+    private static var windowController: NSWindowController?
+
+    @objc static func openMainWindow() {
+        if windowController == nil {
+            windowController = NSStoryboard(name: "Main", bundle: nil)
+                .instantiateController(withIdentifier: "MainWindow") as? NSWindowController
+        }
         NSApp.activate(ignoringOtherApps: true)
-        NSApp.windows.first { $0.contentViewController != nil && !($0 is NSPanel) }?.makeKeyAndOrderFront(nil)
+        windowController?.showWindow(nil)
+        windowController?.window?.makeKeyAndOrderFront(nil)
+    }
+
+    // A status-item popover takes the menu bar's appearance, which follows the wallpaper rather than the
+    // system setting, so set it from the theme (Native Glass: the system's light/dark) each time it shows.
+    private func updatePopoverAppearance() {
+        popover.appearance = AppTheme.stored.resolvedAppearance
     }
 
     // Re-read so the panel or menu reflects changes made from the phone or the headset.

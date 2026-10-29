@@ -14,18 +14,19 @@
 @end
 
 @implementation AppDelegate
+// A menu-bar app (LSUIElement): no Dock icon, and the window only opens from the menu-bar item.
 - (void)applicationDidFinishLaunching:(NSNotification *)aNotification {
-    _window = [[[NSApplication sharedApplication] windows] firstObject];
     [MenuBarController install];
 }
 
+// Launching the app again while it's running (e.g. from Finder) opens the window.
 - (BOOL)applicationShouldHandleReopen:(NSApplication *)theApplication hasVisibleWindows:(BOOL)flag
 {
     if (flag) {
         return NO;
     }
     else {
-        [_window makeKeyAndOrderFront:self];
+        [MenuBarController openMainWindow];
         return YES;
     }
 }

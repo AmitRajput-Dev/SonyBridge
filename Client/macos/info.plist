@@ -18,6 +18,8 @@
 	<string>0.4.0</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.utilities</string>
+	<key>LSUIElement</key>
+	<true/>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>This app uses Bluetooth in order to connect to your headphones.</string>
 	<key>NSHighResolutionCapable</key>

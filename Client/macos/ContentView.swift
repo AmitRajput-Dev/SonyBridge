@@ -192,44 +192,64 @@ struct ContentView: View {
     private let eqBandLabels = ["400", "1k", "2.5k", "6.3k", "16k"]
     private let tenBandEqLabels = ["31", "63", "125", "250", "500", "1k", "2k", "4k", "8k", "16k"]
 
+    // The graph shows the active preset's curve. Editing it (or Clear Bass) switches to Manual, starting
+    // from that curve, the way Sony's app does.
     private var equalizerCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            cardTitle("Equalizer")
-            EQPreview(bands: model.eqBands, range: model.tenBandEqualizer ? 0...12 : -10...10)
+        let manual = model.eqPreset == 0xA0
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                cardTitle("Equalizer")
+                Spacer()
+                if manual && !model.tenBandEqualizer {
+                    CapsuleButton("Flat") {
+                        model.eqBands = model.eqBands.map { _ in 0 }
+                        model.clearBass = 0
+                        model.applyCustomEq()
+                    }
+                }
+            }
+            // The ten-band layout's 0...12 device steps have no known dB mapping yet, so they're shown raw.
+            EQEditor(bands: model.eqBands,
+                     labels: model.tenBandEqualizer ? tenBandEqLabels : eqBandLabels,
+                     range: model.tenBandEqualizer ? 0...12 : -10...10,
+                     signed: !model.tenBandEqualizer) { band, value in
+                model.eqBands[band] = value
+                model.applyCustomEq()
+            }
+            if !manual {
+                Text("Drag a band to fine-tune. This switches to Manual.")
+                    .font(.system(size: 11))
+                    .foregroundColor(palette.secondary)
+            }
+            if !model.tenBandEqualizer {
+                clearBassRow
+            }
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
                 ForEach(EQPresets.list(tenBand: model.tenBandEqualizer), id: \.1) { preset in
                     eqChip(preset.0, preset.1)
-                }
-            }
-            if model.eqPreset == 0xA0 {
-                Divider().background(palette.cardStroke)
-                let labels = model.tenBandEqualizer ? tenBandEqLabels : eqBandLabels
-                ForEach(0..<min(model.eqBands.count, labels.count), id: \.self) { i in
-                    eqBandRow(labels[i], value: Binding(
-                        get: { Double(model.eqBands[i]) },
-                        set: { model.eqBands[i] = Int($0.rounded()); model.applyCustomEq() }
-                    ), display: model.eqBands[i], raw: model.tenBandEqualizer)
-                }
-                if !model.tenBandEqualizer {
-                    eqBandRow("Bass", value: Binding(
-                        get: { Double(model.clearBass) },
-                        set: { model.clearBass = Int($0.rounded()); model.applyCustomEq() }
-                    ), display: model.clearBass, accent: true)
                 }
             }
         }
         .themedCard()
     }
 
-    // raw: the ten-band layout's 0...12 device steps (no dB mapping is known yet), shown unsigned.
-    private func eqBandRow(_ label: String, value: Binding<Double>, display: Int, accent: Bool = false, raw: Bool = false) -> some View {
+    private var clearBassRow: some View {
         HStack(spacing: 10) {
-            Text(label)
+            Text("Clear Bass")
                 .font(.system(size: 11, weight: .medium))
-                .foregroundColor(accent ? palette.accentText : palette.secondary)
-                .frame(width: 34, alignment: .leading)
-            Slider(value: value, in: raw ? 0...12 : -10...10, step: 1).accentColor(palette.accent)
-            Text(raw ? "\(display)" : "\(display > 0 ? "+" : "")\(display)")
+                .foregroundColor(palette.accentText)
+                .fixedSize()
+            Slider(value: Binding(
+                get: { Double(model.clearBass) },
+                set: {
+                    let value = Int($0.rounded())
+                    guard value != model.clearBass else { return }
+                    model.clearBass = value
+                    model.applyCustomEq()
+                }
+            ), in: -10...10, step: 1)
+            .accentColor(palette.accent)
+            Text(model.clearBass > 0 ? "+\(model.clearBass)" : "\(model.clearBass)")
                 .font(.system(size: 11, weight: .semibold, design: .monospaced))
                 .foregroundColor(palette.primary)
                 .frame(width: 26, alignment: .trailing)
@@ -257,8 +277,6 @@ struct ContentView: View {
         }
         .buttonStyle(PlainButtonStyle())
     }
-
-    private let apoOptions = ["Off", "5 min", "30 min", "1 hour", "3 hours", "When taken off"]
 
     private var settingsCard: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -293,7 +311,7 @@ struct ContentView: View {
                         get: { model.autoPowerOff },
                         set: { model.setAutoPowerOff($0) }
                     )) {
-                        ForEach(0..<apoOptions.count, id: \.self) { i in Text(apoOptions[i]).tag(i) }
+                        ForEach(0..<AutoPowerOff.options.count, id: \.self) { i in Text(AutoPowerOff.options[i]).tag(i) }
                     }
                     .pickerStyle(MenuPickerStyle())
                     .frame(width: 130)
@@ -554,10 +572,15 @@ enum EQPresets {
     static func list(tenBand: Bool) -> [(String, Int)] { tenBand ? Self.tenBand : fiveBand }
 }
 
+// Indexed like Headphones::setAutoPowerOff (0=Off ... 5=when taken off).
+enum AutoPowerOff {
+    static let options = ["Off", "5 min", "30 min", "1 hour", "3 hours", "When taken off"]
+}
+
 extension SHCAmbientMode {
     var displayName: String {
         switch self {
-        case .noiseCanceling: return "Noise Canceling"
+        case .noiseCanceling: return "Noise Cancelling"
         case .ambientSound: return "Ambient"
         default: return "Off"
         }
@@ -666,7 +689,7 @@ struct StatusChips: View {
     }
 }
 
-// Noise Canceling / Ambient / Off: segments in a recessed track, or separate pills in Sony Signature.
+// Noise Cancelling / Ambient / Off: segments in a recessed track, or separate pills in Sony Signature.
 struct AmbientModeControl: View {
     @ObservedObject var model: HeadphonesModel
 

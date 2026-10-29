@@ -11,12 +11,13 @@ struct QuickControlsView: View {
 
     @ObservedObject private var model = HeadphonesModel.shared
     @AppStorage(AppTheme.storageKey) private var theme = AppTheme.refinedDark
+    @AppStorage("quickControlsMoreExpanded") private var moreExpanded = false
     @Environment(\.colorScheme) private var colorScheme
 
     private var palette: Palette { theme.palette(colorScheme) }
 
     // 320pt gives each mode segment a little more room than the window's at its 360pt minimum, so
-    // "Noise Canceling" fits within the mode control's minimum scale. The height follows the content.
+    // "Noise Cancelling" fits within the mode control's minimum scale. The height follows the content.
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             if model.connected {
@@ -94,7 +95,68 @@ struct QuickControlsView: View {
             .themedCard(compact: true)
         }
 
+        if model.supportsDsee || model.hasAutoPowerOff {
+            moreSettings
+        }
+
         errorText
+    }
+
+    // Less-used settings, collapsed by default so the panel stays short. The open/closed state is remembered.
+    private var moreSettings: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Button(action: { withAnimation(.easeInOut(duration: 0.15)) { moreExpanded.toggle() } }) {
+                HStack {
+                    Text("More Settings")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(palette.primary)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(palette.secondary)
+                        .rotationEffect(.degrees(moreExpanded ? 90 : 0))
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(PlainButtonStyle())
+            .accessibilityValue(moreExpanded ? "Expanded" : "Collapsed")
+
+            if moreExpanded {
+                if model.supportsDsee {
+                    SwitchRow("DSEE", isOn: Binding(get: { model.dsee }, set: { model.setDsee($0) })) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("DSEE")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(palette.primary)
+                            Text("Upscale compressed audio")
+                                .font(.system(size: 11))
+                                .foregroundColor(palette.secondary)
+                        }
+                    }
+                }
+                if model.hasAutoPowerOff {
+                    HStack {
+                        Text("Auto Power-Off")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(palette.primary)
+                        Spacer()
+                        Picker("Auto Power-Off", selection: Binding(
+                            get: { model.autoPowerOff },
+                            set: { model.setAutoPowerOff($0) }
+                        )) {
+                            ForEach(0..<AutoPowerOff.options.count, id: \.self) { i in
+                                Text(AutoPowerOff.options[i]).tag(i)
+                            }
+                        }
+                        .pickerStyle(MenuPickerStyle())
+                        .labelsHidden()
+                        .frame(width: 130)
+                        .accentColor(palette.accent)
+                    }
+                }
+            }
+        }
+        .themedCard(compact: true)
     }
 
     private var equalizerRow: some View {
