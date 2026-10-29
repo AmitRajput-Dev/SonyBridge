@@ -57,6 +57,37 @@ namespace V1Command
 	inline constexpr unsigned char SUB_AUTO_POWER_OFF = 0x04;
 	inline constexpr unsigned char SUB_SPEAK_TO_CHAT  = 0x05;
 	inline constexpr unsigned char MANUAL_EQ = 0xff;
+
+	// Supported-function list: 06 00 -> 07 00 <count> <function ids...>.
+	inline constexpr unsigned char SUPPORT_FUNCTION_GET = 0x06;
+	inline constexpr unsigned char SUPPORT_FUNCTION_RET = 0x07;
+	// General settings, in the slots (d1..d4) the function list advertises. Same opcodes as v2, different
+	// layout, captured from a WH-1000XM4 on fw 3.0.1 and matching acouplet (baglayan/acouplet PR #5):
+	//   d0 <slot> 01 -> d1 <slot> 02(boolean) <len>name <len>summary 01 00
+	//   d6 <slot>    -> d7 <slot> 01 <01=on/00=off>
+	//   d8 <slot> 01 <01=on/00=off>
+	inline constexpr unsigned char GS_GET_CAPABILITY = 0xd0;
+	inline constexpr unsigned char GS_RET_CAPABILITY = 0xd1;
+	inline constexpr unsigned char GS_GET_PARAM      = 0xd6;
+	inline constexpr unsigned char GS_RET_PARAM      = 0xd7;
+	inline constexpr unsigned char GS_SET_PARAM      = 0xd8;
+	inline constexpr unsigned char GS_TYPE_BOOLEAN   = 0x02;
+	inline constexpr unsigned char GS_PARAM_BOOLEAN  = 0x01;
+	inline constexpr unsigned char GS_SLOT_FIRST     = 0xd1;
+	inline constexpr unsigned char GS_SLOT_LAST      = 0xd4;
+	inline constexpr unsigned char GS_DISPLAY_LANGUAGE_ENGLISH = 0x01;
+	// A setting that drops the Bluetooth links (turning multipoint on/off) is held until confirmed:
+	// the device sends 99 01 <message> <action type> and applies it on 98 01 <message> 01. It only asks
+	// a client that has sent 94 01 00 (Sound Connect does, once per connection); otherwise it declines the
+	// change with a d9 notification of the old value. From an iPhone Sound Connect capture, XM4 fw 3.0.1.
+	inline constexpr unsigned char ALERT_SET_STATUS = 0x94;
+	inline constexpr unsigned char ALERT_STATUS_ENABLE = 0x00;
+	inline constexpr unsigned char ALERT_NTFY = 0x99;
+	inline constexpr unsigned char ALERT_SET  = 0x98;
+	inline constexpr unsigned char ALERT_FORMAT_FIXED = 0x01;
+	inline constexpr unsigned char ALERT_MULTIPOINT_ON  = 0x06;
+	inline constexpr unsigned char ALERT_MULTIPOINT_OFF = 0x07;
+	inline constexpr unsigned char ALERT_ACTION_POSITIVE = 0x01;
 }
 
 // Second-generation (v2) inquiry/response command opcodes (the first payload byte).

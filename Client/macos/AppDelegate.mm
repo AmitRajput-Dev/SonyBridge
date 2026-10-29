@@ -14,20 +14,15 @@
 @end
 
 @implementation AppDelegate
+// A menu-bar app (LSUIElement): no Dock icon or window; everything lives in the menu-bar panel.
 - (void)applicationDidFinishLaunching:(NSNotification *)aNotification {
-    _window = [[[NSApplication sharedApplication] windows] firstObject];
     [MenuBarController install];
 }
 
 - (BOOL)applicationShouldHandleReopen:(NSApplication *)theApplication hasVisibleWindows:(BOOL)flag
 {
-    if (flag) {
-        return NO;
-    }
-    else {
-        [_window makeKeyAndOrderFront:self];
-        return YES;
-    }
+    [MenuBarController showPanel];
+    return NO;
 }
 
 - (void)applicationWillTerminate:(NSNotification *)aNotification {

@@ -13,6 +13,5 @@
 #import "MacOSBluetoothConnector.h"
 
 @interface AppDelegate : NSObject <NSApplicationDelegate>
-    @property (weak) NSWindow* window;
 
 @end

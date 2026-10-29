@@ -18,10 +18,9 @@
 		A8DC78FF2576967D00447738 /* ByteMagic.cpp in Sources */ = {isa = PBXBuildFile; fileRef = A8DC78FD2576967D00447738 /* ByteMagic.cpp */; };
 		A8DC790525769A6600447738 /* IOBluetooth.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A8DC790425769A6600447738 /* IOBluetooth.framework */; };
 		A8DC792C25769C9900447738 /* AppDelegate.mm in Sources */ = {isa = PBXBuildFile; fileRef = A8DC792825769C9900447738 /* AppDelegate.mm */; };
-		A8DC792D25769C9900447738 /* ViewController.mm in Sources */ = {isa = PBXBuildFile; fileRef = A8DC792A25769C9900447738 /* ViewController.mm */; };
 		A8DC793225769EA500447738 /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = A8DC78E92576923D00447738 /* Main.storyboard */; };
 		CC0000000000000000000001 /* HeadphonesBridge.mm in Sources */ = {isa = PBXBuildFile; fileRef = CC0000000000000000000002 /* HeadphonesBridge.mm */; };
-		CC0000000000000000000004 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC0000000000000000000005 /* ContentView.swift */; };
+		CC0000000000000000000004 /* SharedViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC0000000000000000000005 /* SharedViews.swift */; };
 		CC0000000000000000000006 /* HeadphonesModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC0000000000000000000007 /* HeadphonesModel.swift */; };
 		CC00000000000000000000A1 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC00000000000000000000A2 /* Theme.swift */; };
 		CC00000000000000000000A3 /* MenuBarController.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC00000000000000000000A4 /* MenuBarController.swift */; };
@@ -54,12 +53,10 @@
 		A8DC78FE2576967D00447738 /* ByteMagic.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = ByteMagic.h; path = ../ByteMagic.h; sourceTree = "<group>"; };
 		A8DC790425769A6600447738 /* IOBluetooth.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = IOBluetooth.framework; path = System/Library/Frameworks/IOBluetooth.framework; sourceTree = SDKROOT; };
 		A8DC792825769C9900447738 /* AppDelegate.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; path = AppDelegate.mm; sourceTree = "<group>"; };
-		A8DC792925769C9900447738 /* ViewController.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = ViewController.h; sourceTree = "<group>"; };
-		A8DC792A25769C9900447738 /* ViewController.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; path = ViewController.mm; sourceTree = "<group>"; };
 		A8DC792B25769C9900447738 /* AppDelegate.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = AppDelegate.h; sourceTree = "<group>"; };
 		CC0000000000000000000002 /* HeadphonesBridge.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = HeadphonesBridge.mm; sourceTree = "<group>"; };
 		CC0000000000000000000003 /* HeadphonesBridge.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = HeadphonesBridge.h; sourceTree = "<group>"; };
-		CC0000000000000000000005 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		CC0000000000000000000005 /* SharedViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedViews.swift; sourceTree = "<group>"; };
 		CC0000000000000000000007 /* HeadphonesModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeadphonesModel.swift; sourceTree = "<group>"; };
 		CC00000000000000000000A2 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		CC00000000000000000000A4 /* MenuBarController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarController.swift; sourceTree = "<group>"; };
@@ -107,11 +104,9 @@
 				A8A3D31C283EC38500148E80 /* Headphones.h */,
 				A8DC792B25769C9900447738 /* AppDelegate.h */,
 				A8DC792825769C9900447738 /* AppDelegate.mm */,
-				A8DC792925769C9900447738 /* ViewController.h */,
-				A8DC792A25769C9900447738 /* ViewController.mm */,
 				CC0000000000000000000003 /* HeadphonesBridge.h */,
 				CC0000000000000000000002 /* HeadphonesBridge.mm */,
-				CC0000000000000000000005 /* ContentView.swift */,
+				CC0000000000000000000005 /* SharedViews.swift */,
 				CC0000000000000000000007 /* HeadphonesModel.swift */,
 				CC00000000000000000000A2 /* Theme.swift */,
 				CC00000000000000000000A4 /* MenuBarController.swift */,
@@ -203,14 +198,13 @@
 				A8A3D31E283EC38600148E80 /* Headphones.cpp in Sources */,
 				A8DC78EB2576923D00447738 /* main.mm in Sources */,
 				A8DC78EC2576923D00447738 /* MacOSBluetoothConnector.mm in Sources */,
-				A8DC792D25769C9900447738 /* ViewController.mm in Sources */,
 				A8DC78F12576952E00447738 /* BluetoothWrapper.cpp in Sources */,
 				A8DC78FA2576954100447738 /* TimedMessageQueue.cpp in Sources */,
 				A8DC78F52576953600447738 /* CommandSerializer.cpp in Sources */,
 				A8DC78FF2576967D00447738 /* ByteMagic.cpp in Sources */,
 				A8DC792C25769C9900447738 /* AppDelegate.mm in Sources */,
 				CC0000000000000000000001 /* HeadphonesBridge.mm in Sources */,
-				CC0000000000000000000004 /* ContentView.swift in Sources */,
+				CC0000000000000000000004 /* SharedViews.swift in Sources */,
 				CC0000000000000000000006 /* HeadphonesModel.swift in Sources */,
 				CC00000000000000000000A1 /* Theme.swift in Sources */,
 				CC00000000000000000000A3 /* MenuBarController.swift in Sources */,

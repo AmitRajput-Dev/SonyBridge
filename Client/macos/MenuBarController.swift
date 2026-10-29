@@ -10,7 +10,9 @@ import SwiftUI
 // Installed once from AppDelegate; reads and drives the same HeadphonesModel as the window. The icon shows the
 // playback device next to the headphones (phone, computer, or its multipoint slot number), and the headphones
 // fill in while playback is fixed to this Mac.
-@objc final class MenuBarController: NSObject, NSMenuDelegate {
+// The icon is only in the menu bar while a Sony headset is connected to the Mac (auto-connect handles the
+// rest); launching the app again shows it, with the panel, until the panel closes.
+@objc final class MenuBarController: NSObject, NSMenuDelegate, NSPopoverDelegate {
     private static var instance: MenuBarController?
 
     private let model = HeadphonesModel.shared
@@ -18,6 +20,7 @@ import SwiftUI
     private let menu = NSMenu()
     private let popover = NSPopover()
     private var cancellables = Set<AnyCancellable>()
+    private var appearanceObservation: NSKeyValueObservation?
 
     @objc static func install() {
         guard instance == nil else { return }
@@ -31,13 +34,11 @@ import SwiftUI
         menu.delegate = self
         menu.autoenablesItems = false
 
-        let panel = NSHostingController(rootView: QuickControlsView(
-            openWindow: { [weak self] in self?.popover.performClose(nil); Self.openMainWindow() },
-            quit: { NSApp.terminate(nil) }
-        ))
+        let panel = NSHostingController(rootView: QuickControlsView(quit: { NSApp.terminate(nil) }))
         if #available(macOS 13.0, *) { panel.sizingOptions = .preferredContentSize }
         popover.contentViewController = panel
         popover.behavior = .transient
+        popover.delegate = self
 
         statusItem.button?.target = self
         statusItem.button?.action = #selector(statusItemClicked(_:))
@@ -45,8 +46,27 @@ import SwiftUI
         updateIcon()
         // objectWillChange fires before the new values land, so read them on the next main-loop turn.
         model.objectWillChange
-            .sink { [weak self] _ in DispatchQueue.main.async { self?.updateIcon() } }
+            .sink { [weak self] _ in DispatchQueue.main.async { self?.updateIcon(); self?.updateVisibility() } }
             .store(in: &cancellables)
+        // Follow a light/dark switch made while the panel is open.
+        appearanceObservation = NSApp.observe(\.effectiveAppearance) { [weak self] _, _ in
+            DispatchQueue.main.async { self?.updatePopoverAppearance() }
+        }
+        model.startAutoConnect()
+        updateVisibility()
+    }
+
+    // Set from a relaunch until that panel closes, so the icon anchoring it isn't hidden in between.
+    private var panelRequested = false
+
+    private func updateVisibility() {
+        let show = model.headsetConnectedToMac || model.connected || model.connecting || popover.isShown || panelRequested
+        if statusItem.isVisible != show { statusItem.isVisible = show }
+    }
+
+    func popoverDidClose(_ notification: Notification) {
+        panelRequested = false
+        updateVisibility()
     }
 
     @objc private func statusItemClicked(_ sender: NSStatusBarButton) {
@@ -60,18 +80,40 @@ import SwiftUI
         } else if popover.isShown {
             popover.performClose(nil)
         } else {
-            refreshMultipointIfIdle()
-            if let panel = popover.contentViewController, #unavailable(macOS 13.0) {
-                popover.contentSize = panel.view.fittingSize
-            }
-            popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
-            popover.contentViewController?.view.window?.makeKey()
+            showPopover()
         }
     }
 
-    static func openMainWindow() {
+    private func showPopover() {
+        guard let button = statusItem.button else { return }
+        refreshMultipointIfIdle()
+        updatePopoverAppearance()
+        if let panel = popover.contentViewController, #unavailable(macOS 13.0) {
+            popover.contentSize = panel.view.fittingSize
+        }
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        popover.contentViewController?.view.window?.makeKey()
+    }
+
+    // The panel is the whole app; launching it again while it's running (e.g. from Finder) opens it.
+    @objc static func showPanel() {
+        guard let instance = instance else { return }
         NSApp.activate(ignoringOtherApps: true)
-        NSApp.windows.first { $0.contentViewController != nil && !($0 is NSPanel) }?.makeKeyAndOrderFront(nil)
+        if instance.statusItem.isVisible {
+            instance.showPopover()
+        } else {
+            // Hidden while no headset is connected: bring the icon back to anchor the panel, and let the
+            // button lay out before showing it. Closing the panel hides the icon again.
+            instance.panelRequested = true
+            instance.statusItem.isVisible = true
+            DispatchQueue.main.async { instance.showPopover() }
+        }
+    }
+
+    // A status-item popover takes the menu bar's appearance, which follows the wallpaper rather than the
+    // system setting, so set it from the theme (Native Glass: the system's light/dark) each time it shows.
+    private func updatePopoverAppearance() {
+        popover.appearance = AppTheme.stored.resolvedAppearance
     }
 
     // Re-read so the panel or menu reflects changes made from the phone or the headset.
@@ -162,13 +204,11 @@ import SwiftUI
             menu.addItem(connect)
         }
         menu.addItem(.separator())
-        menu.addItem(actionItem("Open SonyBridge", #selector(openWindow)))
         menu.addItem(actionItem("Quit SonyBridge", #selector(quit), key: "q"))
     }
 
     @objc private func pinToThisMac() { model.pinPlaybackToThisMac() }
     @objc private func unfixPlayback() { model.setPlaybackPinned(false) }
-    @objc private func openWindow() { Self.openMainWindow() }
     @objc private func quit() { NSApp.terminate(nil) }
 
     @objc private func connectHeadphones() {

@@ -132,7 +132,13 @@ public:
 	int setPlaybackPinned(bool pinned);
 	// "Connect to 2 devices". The setting is device-persistent, so the app never enforces a default. Throws
 	// (without sending) unless requestMultipoint() found the MULTIPOINT_SETTING general-settings slot.
+	// On v1 the headset restarts to apply it, dropping this connection.
 	void setMultipoint(bool enabled);
+
+	// Touch controls on/off (v1 TOUCH_PANEL_SETTING general setting, found by requestMultipoint()).
+	bool hasTouchPanelSetting();
+	bool getTouchPanelEnabled();
+	void setTouchPanel(bool enabled);
 
 	bool isChanged();
 	void setChanges();
@@ -165,6 +171,8 @@ private:
 	// The WH-1000XM6 speaks a different layout for two v2 commands: noise-control state is read via inquired
 	// type 0x19 (0x17 answers all zeros), and the equalizer uses inquired type 0x04 with 10 raw bands.
 	bool _isWh1000Xm6() const;
+	// requestMultipoint() on v1: the multipoint and touch panel general settings (GETs only).
+	void _requestGeneralSettingsV1();
 	// Both return false if the device didn't answer that battery sub-type.
 	bool _requestDualBattery(unsigned char subType);
 	bool _requestSingleBattery(unsigned char subType, int& levelOut, bool& chargingOut);
@@ -188,6 +196,7 @@ private:
 	bool _hasPlaybackPinState = false; bool _playbackPinned = false;
 	bool _multipointSlotSearched = false; int _multipointSlot = -1;
 	bool _hasMultipointSetting = false; bool _multipointEnabled = false;
+	int _touchPanelSlot = -1; bool _hasTouchPanelSetting = false; bool _touchPanelEnabled = false;
 	std::string _multipointDiscoveryLog;
 	std::string _multipointWriteLog;
 	std::string _multipointDiagnostics;
