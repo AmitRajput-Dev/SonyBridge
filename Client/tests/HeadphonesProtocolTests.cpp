@@ -59,11 +59,26 @@ public:
 	std::vector<Buffer> sentPayloads;
 	Buffer recvPrefix;
 	bool notificationBeforeNextAck = false;
+	Buffer speakToChatReply = { (char)V1Command::BTNMODE_RET, (char)V1Command::SUB_SPEAK_TO_CHAT, 0x01, 0x01 };
+	bool multipointDeclines = false;
+	bool alertsEnabled = false;
 
 private:
 	void queue(const Buffer& payload, DATA_TYPE type, unsigned char sequence)
 	{
 		incoming.push_back(CommandSerializer::packageDataForBt(payload, type, sequence));
+	}
+
+	// d1 <slot> 02(boolean) <len>name <len>summary 01 00
+	static Buffer generalSetting(unsigned char slot, const std::string& name, const std::string& summary)
+	{
+		Buffer reply = { (char)V1Command::GS_RET_CAPABILITY, (char)slot, (char)V1Command::GS_TYPE_BOOLEAN, (char)name.size() };
+		reply.insert(reply.end(), name.begin(), name.end());
+		reply.push_back((char)summary.size());
+		reply.insert(reply.end(), summary.begin(), summary.end());
+		reply.push_back(0x01);
+		reply.push_back(0x00);
+		return reply;
 	}
 
 	void queueResponse(const Buffer& request)
@@ -83,7 +98,35 @@ private:
 			if (request.size() >= 2 && (unsigned char)request[1] == V1Command::SUB_AUTO_POWER_OFF)
 				response = { (char)V1Command::BTNMODE_RET, (char)V1Command::SUB_AUTO_POWER_OFF, 0x01, 0x01, 0x01 };
 			else if (request.size() >= 2 && (unsigned char)request[1] == V1Command::SUB_SPEAK_TO_CHAT)
-				response = { (char)V1Command::BTNMODE_RET, (char)V1Command::SUB_SPEAK_TO_CHAT, 0x01, 0x01 };
+				response = speakToChatReply;
+			break;
+		// General settings, as a WH-1000XM4 on fw 3.0.1 answered them (multipoint in d2, touch panel in d1).
+		case V1Command::SUPPORT_FUNCTION_GET:
+			response = { (char)V1Command::SUPPORT_FUNCTION_RET, 0x00, 0x17, 0x71, 0x38, 0x62, (char)0xf5, (char)0x81, 0x51,
+				(char)0xa1, (char)0xe1, (char)0xe2, (char)0xd2, (char)0xf6, (char)0xd1, (char)0xf4, (char)0xf3, 0x39, 0x12,
+				0x13, 0x11, 0x30, (char)0xc1, 0x14, 0x22, 0x21 };
+			break;
+		case V1Command::GS_GET_CAPABILITY:
+			if (request.size() >= 2 && (unsigned char)request[1] == 0xd2)
+				response = generalSetting(0xd2, "MULTIPOINT_SETTING", "MULTIPOINT_SETTING_SUMMARY");
+			else if (request.size() >= 2 && (unsigned char)request[1] == 0xd1)
+				response = generalSetting(0xd1, "TOUCH_PANEL_SETTING", "");
+			break;
+		case V1Command::ALERT_SET_STATUS:
+			if (request.size() >= 3 && (unsigned char)request[1] == V1Command::ALERT_FORMAT_FIXED)
+				alertsEnabled = request[2] == V1Command::ALERT_STATUS_ENABLE;
+			return;
+		case V1Command::GS_GET_PARAM:
+			if (request.size() >= 2) response = { (char)V1Command::GS_RET_PARAM, request[1], 0x01, 0x01 };
+			break;
+		case V1Command::GS_SET_PARAM:
+			// Changing multipoint is held until confirmed: 99 01 <06 on / 07 off> 01, but only once alerts are
+			// enabled (94 01 00). Otherwise an XM4 on fw 3.0.1 notifies its unchanged value, d9 d2 01 01.
+			if (request.size() >= 4 && (unsigned char)request[1] == 0xd2)
+				response = (multipointDeclines || !alertsEnabled)
+					? Buffer({ (char)0xd9, (char)0xd2, 0x01, 0x01 })
+					: Buffer({ (char)V1Command::ALERT_NTFY, (char)V1Command::ALERT_FORMAT_FIXED,
+						(char)(request[3] ? V1Command::ALERT_MULTIPOINT_ON : V1Command::ALERT_MULTIPOINT_OFF), 0x01 });
 			break;
 		default: return; // SET commands only need the ACK already queued above.
 		}
@@ -205,6 +248,20 @@ int main()
 	require(headphones.hasAutoPowerOff() && headphones.getAutoPowerOff() == 2, "v1 auto-power-off response was not parsed");
 	require(headphones.hasSpeakToChat() && headphones.getSpeakToChat(), "v1 Speak-to-Chat response was not parsed");
 
+	// Captured from a WH-1000XM4 on fw 3.0.1: its Speak-to-Chat GET reply carries kind 00, not 01
+	// (f7 05 00 00 when off, f7 05 00 01 when on), so the capability must still be confirmed.
+	for (char on : { 0x00, 0x01 })
+	{
+		auto xm4 = std::make_unique<FakeV1Connector>();
+		xm4->speakToChatReply = { (char)V1Command::BTNMODE_RET, (char)V1Command::SUB_SPEAK_TO_CHAT, 0x00, on };
+		BluetoothWrapper xm4Bluetooth(std::move(xm4));
+		Headphones xm4Headphones(xm4Bluetooth);
+		xm4Headphones.initDevice();
+		xm4Headphones.probeCapabilities();
+		require(xm4Headphones.hasSpeakToChat(), "XM4 fw 3.0.1 Speak-to-Chat reply (kind 00) was rejected");
+		require(xm4Headphones.getSpeakToChat() == (on != 0), "XM4 fw 3.0.1 Speak-to-Chat state was misread");
+	}
+
 	const auto hasV1BatteryRequest = std::any_of(observed->sentPayloads.begin(), observed->sentPayloads.end(), [](const Buffer& payload) {
 		return payload.size() >= 2 && (unsigned char)payload[0] == V1Command::BATTERY_GET && payload[1] == 0x00;
 	});
@@ -253,21 +310,49 @@ int main()
 		(unsigned char)speakToChat[1] == V1Command::SUB_SPEAK_TO_CHAT && (unsigned char)speakToChat[3] == 0x00,
 		"Speak-to-Chat did not use the v1 command layout");
 
-	// Multipoint has no proven v1 frames (GadgetBridge SonyProtocolImplV1: "Connect two devices not
-	// implemented for V1"), so the XM4 path must never probe or set it.
+	// XM4 multipoint and touch panel: the v1 general-settings layout, found by name from the function list.
 	headphones.requestMultipoint();
-	require(!headphones.hasMultipointSetting(), "multipoint capability must stay unconfirmed on v1");
-	const auto hasMultipointFrame = std::any_of(observed->sentPayloads.begin(), observed->sentPayloads.end(), [](const Buffer& payload) {
-		return !payload.empty() && ((unsigned char)payload[0] == V2Command::GS_GET_CAPABILITY ||
-			(unsigned char)payload[0] == V2Command::GS_GET_PARAM ||
-			(unsigned char)payload[0] == V2Command::GS_SET_PARAM ||
-			(unsigned char)payload[0] == V2Command::SYSCTL_SET);
+	require(headphones.hasMultipointSetting() && headphones.getMultipointEnabled(), "XM4 multipoint setting was not read");
+	require(headphones.hasTouchPanelSetting() && headphones.getTouchPanelEnabled(), "XM4 touch panel setting was not read");
+	const auto hasV2SettingRead = std::any_of(observed->sentPayloads.begin(), observed->sentPayloads.end(), [](const Buffer& payload) {
+		return payload.size() == 2 && (unsigned char)payload[0] == V1Command::GS_GET_CAPABILITY;
 	});
-	require(!hasMultipointFrame, "XM4 path emitted a v2 multipoint frame (d0/d6/d8/98)");
-	bool multipointRejected = false;
-	try { headphones.setMultipoint(true); }
-	catch (const std::exception&) { multipointRejected = true; }
-	require(multipointRejected, "setMultipoint on v1 must throw instead of sending");
+	require(!hasV2SettingRead, "XM4 general-settings name read must carry the display language byte");
+
+	headphones.setMultipoint(false);
+	const auto& confirm = observed->sentPayloads.back();
+	const auto& multipointWrite = observed->sentPayloads[observed->sentPayloads.size() - 2];
+	require(observed->sentPayloads[observed->sentPayloads.size() - 3] == Buffer({ (char)V1Command::ALERT_SET_STATUS, 0x01, 0x00 }),
+		"XM4 multipoint change was not preceded by 94 01 00 (without it the headset declines)");
+	require(multipointWrite == Buffer({ (char)V1Command::GS_SET_PARAM, (char)0xd2, 0x01, 0x00 }),
+		"XM4 multipoint off did not use d8 <slot> 01 00");
+	require(confirm == Buffer({ (char)V1Command::ALERT_SET, 0x01, (char)V1Command::ALERT_MULTIPOINT_OFF, 0x01 }),
+		"XM4 multipoint off confirmation was not answered with 98 01 07 01");
+	require(!headphones.getMultipointEnabled(), "XM4 multipoint state did not follow the write");
+
+	// A declined change must not be reported as applied: the state is read back and the write throws.
+	{
+		auto declining = std::make_unique<FakeV1Connector>();
+		declining->multipointDeclines = true;
+		BluetoothWrapper decliningBluetooth(std::move(declining));
+		Headphones decliningHeadphones(decliningBluetooth);
+		decliningHeadphones.initDevice();
+		decliningHeadphones.requestMultipoint();
+		bool declined = false;
+		try { decliningHeadphones.setMultipoint(false); }
+		catch (const RecoverableException&) { declined = true; }
+		require(declined, "a declined XM4 multipoint change was reported as applied");
+		require(decliningHeadphones.getMultipointEnabled(), "a declined XM4 multipoint change left the state flipped");
+	}
+
+	headphones.setTouchPanel(false);
+	require(observed->sentPayloads.back() == Buffer({ (char)V1Command::GS_SET_PARAM, (char)0xd1, 0x01, 0x00 }),
+		"XM4 touch panel off did not use d8 <slot> 01 00");
+
+	const auto hasV2MultipointCommit = std::any_of(observed->sentPayloads.begin(), observed->sentPayloads.end(), [](const Buffer& payload) {
+		return payload.size() >= 2 && (unsigned char)payload[0] == V2Command::SYSCTL_SET && payload[1] == 0x00;
+	});
+	require(!hasV2MultipointCommit, "XM4 path emitted the v2 multipoint commit (98 00 ...)");
 
 	// --- v2 multipoint ("Connect to 2 devices"), byte layout proven by GadgetBridge on the WH-ULT900N
 	// (SonyProtocolImplV2 commits 8cbc309346, e8520865f3, 5d7b37d1b7) ---
