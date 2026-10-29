@@ -199,12 +199,24 @@ static BOOL SHCLooksLikeSonyHeadset(NSString *name) {
     return NO;
 }
 
+// A user-renamed headset (e.g. "Birdie") fails the name check, so also accept any paired device whose
+// cached SDP records advertise either Sony control service - the same lookup connect() relies on.
+static BOOL SHCHasSonyService(IOBluetoothDevice *device) {
+    IOBluetoothSDPUUID *v1 = [IOBluetoothSDPUUID uuidWithBytes:(void*)SERVICE_UUID_IN_BYTES length:16];
+    IOBluetoothSDPUUID *v2 = [IOBluetoothSDPUUID uuidWithBytes:(void*)SERVICE_UUID_V2_IN_BYTES length:16];
+    return [device getServiceRecordForUUID:v1] != nil || [device getServiceRecordForUUID:v2] != nil;
+}
+
+static BOOL SHCIsSonyHeadset(IOBluetoothDevice *device) {
+    return SHCLooksLikeSonyHeadset([device name]) || SHCHasSonyService(device);
+}
+
 - (void)scanAndConnectWithCompletion:(void (^)(BOOL, NSString * _Nullable))completion {
     // Prefer the already system-connected Sony headset (Sony-app "My Device" behaviour) and skip the
     // native picker, which shows a confusing empty list when nothing is connected.
     IOBluetoothDevice *device = nil;
     for (IOBluetoothDevice *paired in [IOBluetoothDevice pairedDevices]) {
-        if ([paired isConnected] && SHCLooksLikeSonyHeadset([paired name])) {
+        if ([paired isConnected] && SHCIsSonyHeadset(paired)) {
             device = paired;
             break;
         }
@@ -212,7 +224,7 @@ static BOOL SHCLooksLikeSonyHeadset(NSString *name) {
     // BLE/audio-only headsets (e.g. ULT WEAR) report isConnected == NO; fall back to any paired Sony headset.
     if (!device) {
         for (IOBluetoothDevice *paired in [IOBluetoothDevice pairedDevices]) {
-            if (SHCLooksLikeSonyHeadset([paired name])) {
+            if (SHCIsSonyHeadset(paired)) {
                 device = paired;
                 break;
             }
