@@ -77,11 +77,17 @@ typedef NS_ENUM(NSInteger, SHCAmbientMode) {
 @property (nonatomic, readonly) BOOL playbackPinned;
 @property (nonatomic, readonly) BOOL hasMultipointSetting;
 @property (nonatomic, readonly) BOOL multipointEnabled;
+@property (nonatomic, readonly) BOOL hasTouchPanelSetting;
+@property (nonatomic, readonly) BOOL touchPanelEnabled;
 @property (nonatomic, copy, readonly) NSString *multipointDiagnostics; // hex log of the last multipoint reads
 
 // Runs the native Bluetooth device picker (modal, main thread) and connects to the chosen device.
 // completion is called on the main thread.
 - (void)scanAndConnectWithCompletion:(void (^)(BOOL ok, NSString * _Nullable error))completion;
+// YES when a paired Sony headset is connected to the Mac, i.e. scanAndConnect would use it without a picker.
+@property (nonatomic, readonly) BOOL hasConnectedSonyHeadset;
+// Calls handler (on the main queue) whenever a Sony headset connects to the Mac.
+- (void)watchForHeadsetConnections:(void (^)(void))handler NS_SWIFT_NAME(watchForHeadsetConnections(_:));
 
 - (void)disconnect;
 
@@ -110,6 +116,7 @@ typedef NS_ENUM(NSInteger, SHCAmbientMode) {
 - (void)setSpeakToChat:(BOOL)enabled completion:(void (^)(BOOL ok, NSString * _Nullable error))completion;
 - (void)setAdaptiveVolume:(BOOL)enabled completion:(void (^)(BOOL ok, NSString * _Nullable error))completion;
 - (void)setMultipoint:(BOOL)enabled completion:(void (^)(BOOL ok, NSString * _Nullable error))completion;
+- (void)setTouchPanel:(BOOL)enabled completion:(void (^)(BOOL ok, NSString * _Nullable error))completion;
 
 // Re-reads the fast-changing state (ambient/NC, level, EQ, DSEE) so changes made with the headphone's
 // own button show up in the app. Called on a timer while connected.

@@ -316,6 +316,7 @@ struct EQEditor: View {
     let labels: [String]
     let range: ClosedRange<Int>
     let signed: Bool                    // dB values (-10...10); the ten-band layout's raw 0...12 steps are unsigned
+    var plotHeight: CGFloat = 150
     let set: (_ band: Int, _ value: Int) -> Void
 
     @State private var dragging: Int?
@@ -323,7 +324,6 @@ struct EQEditor: View {
     @Environment(\.appTheme) private var theme
     @Environment(\.colorScheme) private var colorScheme
 
-    private let plotHeight: CGFloat = 150
     private let axisWidth: CGFloat = 26
     private let labelsHeight: CGFloat = 34
 

@@ -49,6 +49,8 @@ static NSString *SHCNormalizedAddress(NSString *address) {
     // All device I/O runs on this serial queue. Bluetooth commands are stateful, and serializing reads with
     // writes also prevents a slow capability probe from racing a user action or dynamic refresh.
     dispatch_queue_t _cmdQueue;
+    IOBluetoothUserNotification *_connectNotification;
+    void (^_headsetConnectedHandler)(void);
 }
 
 - (instancetype)init {
@@ -168,6 +170,8 @@ static NSString *SHCNormalizedAddress(NSString *address) {
 - (BOOL)playbackPinned { return _hp && _hp->isPlaybackPinned(); }
 - (BOOL)hasMultipointSetting { return _hp && _hp->hasMultipointSetting(); }
 - (BOOL)multipointEnabled { return _hp && _hp->getMultipointEnabled(); }
+- (BOOL)hasTouchPanelSetting { return _hp && _hp->hasTouchPanelSetting(); }
+- (BOOL)touchPanelEnabled { return _hp && _hp->getTouchPanelEnabled(); }
 - (NSString *)multipointDiagnostics { return _hp ? @(_hp->getMultipointDiagnostics().c_str()) : @""; }
 
 - (NSArray<SHCPairedDevice *> *)pairedDevices {
@@ -209,6 +213,28 @@ static BOOL SHCHasSonyService(IOBluetoothDevice *device) {
 
 static BOOL SHCIsSonyHeadset(IOBluetoothDevice *device) {
     return SHCLooksLikeSonyHeadset([device name]) || SHCHasSonyService(device);
+}
+
+// The same test scanAndConnect's first pass uses, so a connect made because this said YES never falls
+// through to the device picker.
+- (BOOL)hasConnectedSonyHeadset {
+    for (IOBluetoothDevice *paired in [IOBluetoothDevice pairedDevices]) {
+        if ([paired isConnected] && SHCIsSonyHeadset(paired)) return YES;
+    }
+    return NO;
+}
+
+- (void)watchForHeadsetConnections:(void (^)(void))handler {
+    _headsetConnectedHandler = [handler copy];
+    if (!_connectNotification) {
+        _connectNotification = [IOBluetoothDevice registerForConnectNotifications:self
+                                                                         selector:@selector(bluetoothDeviceConnected:device:)];
+    }
+}
+
+// Any Bluetooth device connecting to the Mac (delivered on the main run loop); only Sony headsets count.
+- (void)bluetoothDeviceConnected:(IOBluetoothUserNotification *)notification device:(IOBluetoothDevice *)device {
+    if (_headsetConnectedHandler && SHCIsSonyHeadset(device)) _headsetConnectedHandler();
 }
 
 - (void)scanAndConnectWithCompletion:(void (^)(BOOL, NSString * _Nullable))completion {
@@ -319,8 +345,8 @@ static BOOL SHCIsSonyHeadset(IOBluetoothDevice *device) {
 }
 
 - (void)refreshMultipointWithCompletion:(void (^)(void))completion {
-    // GETs only, and v2 only: on v1 these opcodes are unverified (0x22-style collisions are possible).
-    if (!_hp || !self.connected || _bt->getProtocolVersion() != SonyProtocolVersion::V2 || !_initialized.load()) {
+    // GETs only. On v1 that's just the general-settings reads (function list, d0, d6), captured from an XM4.
+    if (!_hp || !self.connected || !_initialized.load()) {
         completion();
         return;
     }
@@ -559,6 +585,16 @@ static NSString *_Nullable SHCSourceSwitchError(int result) {
     dispatch_async(_cmdQueue, ^{
         NSString *error = nil; BOOL ok = YES;
         try { hp->setMultipoint(enabled); } catch (std::exception &exc) { ok = NO; error = @(exc.what()); }
+        dispatch_async(dispatch_get_main_queue(), ^{ completion(ok, error); });
+    });
+}
+
+- (void)setTouchPanel:(BOOL)enabled completion:(void (^)(BOOL, NSString * _Nullable))completion {
+    if (!_hp || !self.connected) { completion(NO, @"Not connected."); return; }
+    auto hp = _hp;
+    dispatch_async(_cmdQueue, ^{
+        NSString *error = nil; BOOL ok = YES;
+        try { hp->setTouchPanel(enabled); } catch (std::exception &exc) { ok = NO; error = @(exc.what()); }
         dispatch_async(dispatch_get_main_queue(), ^{ completion(ok, error); });
     });
 }
