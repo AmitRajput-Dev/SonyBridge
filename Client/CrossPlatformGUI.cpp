@@ -337,6 +337,9 @@ const CrossPlatformGUI::DeviceTexture& CrossPlatformGUI::_deviceTexture(const st
 	std::string slug = name;
 	std::transform(slug.begin(), slug.end(), slug.begin(), [](unsigned char ch) { return (char)std::tolower(ch); });
 	std::replace(slug.begin(), slug.end(), ' ', '-');
+	// The ULT WEAR (WH-ULT900N) advertises itself as "Sony ULT WEAR", not by model number.
+	if (slug.find("ult-wear") != std::string::npos || slug.find("ult900") != std::string::npos)
+		slug = "wh-ult900n";
 
 	auto it = this->_deviceTextures.find(slug);
 	if (it != this->_deviceTextures.end())

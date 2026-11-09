@@ -612,8 +612,17 @@ struct ProductImage: View {
     @Environment(\.appTheme) private var theme
     @Environment(\.colorScheme) private var colorScheme
 
+    // Image name for a Bluetooth device name: the lowercased name with dashes ("WH-CH720N" -> "wh-ch720n"),
+    // except for models whose Bluetooth name isn't the model number.
+    static func assetName(for deviceName: String) -> String {
+        let slug = deviceName.lowercased().replacingOccurrences(of: " ", with: "-")
+        // The ULT WEAR (WH-ULT900N) advertises itself as "Sony ULT WEAR".
+        if slug.contains("ult-wear") || slug.contains("ult900") { return "wh-ult900n" }
+        return slug
+    }
+
     var body: some View {
-        if let image = NSImage(named: deviceName.lowercased().replacingOccurrences(of: " ", with: "-")) {
+        if let image = NSImage(named: Self.assetName(for: deviceName)) {
             Image(nsImage: image)
                 .resizable()
                 .aspectRatio(contentMode: .fit)
