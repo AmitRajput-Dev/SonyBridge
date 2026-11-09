@@ -52,6 +52,7 @@ on macOS, and a matching modern UI on Windows/Linux.
 - 🎚️ **Ambient Sound Control** — Noise Cancelling · Ambient Sound (0–20 levels) · Off
 - 🗣️ **Focus on Voice** passthrough
 - 🎛️ **Equalizer** — presets *and* a full **Manual mode** with 5 bands + Clear Bass (10 bands on the WH-1000XM6), with a live curve preview
+- 🔊 **Bass Control** (ULT WEAR) — ULT mode (Off · ULT 1 · ULT 2, the same bass boost the ULT button cycles, kept in sync when you press it) and the Clear Bass slider, as in Sony's app
 - ✨ **DSEE** — Sony's audio upscaling for compressed sources
 - 🔋 **Battery level** — live percentage, including **per-earbud + case** for TWS models
 - 🎧 **Codec & firmware** readout
@@ -59,7 +60,7 @@ on macOS, and a matching modern UI on Windows/Linux.
 - 🖼️ **Device hero image** — your headphones' official Sony product render
 - 🔄 **Live button sync** — changes made on the headset reflect in the app
 - 🔌 **Auto-connect** to your already-paired Sony headset
-- 🍫 **Menu-bar quick controls** — click the menu-bar icon for mode, ambient level, Focus on Voice, EQ preset, battery and playback pinning without opening the window (right-click for the menu)
+- 🍫 **Menu-bar quick controls** — click the menu-bar icon for mode, ambient level, Focus on Voice, ULT mode, EQ preset, battery and playback pinning without opening the window (right-click for the menu)
 - ↔️ **Resizable window** — a tall single column by default; widen it past 720pt for a two-column layout
 - 📱 **Multipoint** — see which devices are connected, switch playback between them, pin playback to this Mac, and turn "Connect to 2 devices" on or off
 - 🧬 **Dual-protocol** — auto-detects and speaks either protocol generation

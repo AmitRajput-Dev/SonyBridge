@@ -53,6 +53,10 @@ final class HeadphonesModel: ObservableObject {
     @Published var clearBass = 0
     @Published var supportsDsee = false
     @Published var dsee = false
+    @Published var supportsUltMode = false
+    @Published var ultMode = 0   // 0 = Off, 1 = ULT 1, 2 = ULT 2
+    // ULT WEAR: clear bass lives in the Bass Control card (next to ULT) and is set on its own, any preset.
+    @Published var supportsClearBassControl = false
 
     @Published var hasAutoPowerOff = false
     @Published var autoPowerOff = 0
@@ -101,6 +105,13 @@ final class HeadphonesModel: ObservableObject {
     private var pendingPush: (mode: SHCAmbientMode, level: Int, focusVoice: Bool)?
     private var eqInFlight = false
     private var pendingEq: (bass: Int, bands: [Int])?
+    // While ULT writes are queued, the poll's read-back could predate them and flip the control back.
+    // A count, not a flag: two quick taps each queue a write, and the first completion mustn't reopen the gate.
+    private var ultWritesInFlight = 0
+    private var ultInFlight: Bool { ultWritesInFlight > 0 }
+    // Clear Bass slider drags coalesce like the EQ sliders: one write in flight, then the latest value.
+    private var clearBassInFlight = false
+    private var pendingClearBass: Int?
 
     // Armed on each successful connect; consumed once Speak-to-Chat capability is
     // confirmed, so the off-on-connect enforcement fires at most once per connection.
@@ -131,9 +142,12 @@ final class HeadphonesModel: ObservableObject {
             self.syncBatteryFromBridge()
             self.eqPreset = self.bridge.eqPreset
             self.supportsEqualizer = self.bridge.supportsEqualizer
-            self.clearBass = self.bridge.clearBass
+            self.supportsClearBassControl = self.bridge.supportsClearBassControl
+            if !self.clearBassInFlight { self.clearBass = self.bridge.clearBass }
             self.supportsDsee = self.bridge.supportsDsee
             self.dsee = self.bridge.dsee
+            self.supportsUltMode = self.bridge.supportsUltMode
+            if !self.ultInFlight { self.ultMode = self.bridge.ultMode }
             self.tenBandEqualizer = self.bridge.tenBandEqualizer
             self.eqBands = self.readEqBands()
             self.hasAutoPowerOff = self.bridge.hasAutoPowerOff
@@ -260,12 +274,20 @@ final class HeadphonesModel: ObservableObject {
                 self.bridge.refreshMultipoint { self.syncMultipointFromBridge() }
             }
             self.bridge.refreshDynamic {
-                // Only publish what refreshDynamic actually re-read: ambient/NC state and the battery.
+                // Only publish what refreshDynamic actually re-read: ambient/NC state, ULT mode and the battery.
                 // EQ and DSEE aren't re-read on this path - they'd come straight back from the C++ cache,
                 // so a failed write would snap back two seconds later and an EQ drag would fight the timer.
                 self.assignIfChanged(\.mode, self.bridge.mode)
                 let level = self.bridge.ambientLevel
                 if level > 0 { self.assignIfChanged(\.ambientLevel, level) }
+                if self.supportsUltMode && !self.ultInFlight {
+                    self.assignIfChanged(\.ultMode, self.bridge.ultMode)
+                }
+                // The ULT read also carries clear bass, so follow it (e.g. changed in the phone app), unless one
+                // of our own clear-bass or EQ writes is still queued - the read could predate it.
+                if self.supportsClearBassControl && !self.clearBassInFlight && self.pendingClearBass == nil && !self.eqInFlight {
+                    self.assignIfChanged(\.clearBass, self.bridge.clearBass)
+                }
                 self.syncBatteryFromBridge()
             }
         }
@@ -337,11 +359,58 @@ final class HeadphonesModel: ObservableObject {
         }
     }
 
+    func setUltMode(_ newMode: Int) {
+        ultMode = newMode
+        errorMessage = nil
+        ultWritesInFlight += 1
+        bridge.setUltMode(newMode) { ok, error in
+            self.ultWritesInFlight = max(0, self.ultWritesInFlight - 1)
+            if !ok, let error = error { self.errorMessage = error }
+            // Once the last queued write has landed, show what the headset has: the last tap on success,
+            // the real state on failure (the bridge re-reads the headset before every write).
+            if !self.ultInFlight { self.ultMode = self.bridge.ultMode }
+        }
+    }
+
+    func setClearBass(_ value: Int) {
+        guard value != clearBass || clearBassInFlight else { return }
+        clearBass = value
+        errorMessage = nil
+        if clearBassInFlight {
+            pendingClearBass = value
+            return
+        }
+        sendClearBass(value)
+    }
+
+    private func sendClearBass(_ sent: Int) {
+        clearBassInFlight = true
+        bridge.setClearBass(sent) { ok, error in
+            self.clearBassInFlight = false
+            if let pending = self.pendingClearBass {
+                self.pendingClearBass = nil
+                if pending != sent {
+                    self.sendClearBass(pending)
+                    return
+                }
+            }
+            if !ok {
+                // The bridge re-read the headset before writing, so this is what it really has.
+                self.clearBass = self.bridge.clearBass
+                if let error = error { self.errorMessage = error }
+            }
+        }
+    }
+
     func disconnect() {
         stopWatchingConnection()
         stopDynamicPolling()
         pendingPush = nil
         pendingEq = nil
+        pendingClearBass = nil
+        ultWritesInFlight = 0
+        supportsUltMode = false
+        supportsClearBassControl = false
         s2cAutoDisablePending = false
         bridge.disconnect()
         connected = false

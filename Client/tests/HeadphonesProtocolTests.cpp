@@ -268,6 +268,10 @@ int main()
 	try { headphones.setMultipoint(true); }
 	catch (const std::exception&) { multipointRejected = true; }
 	require(multipointRejected, "setMultipoint on v1 must throw instead of sending");
+	// ULT mode is a v2-only inquiry; the v1 probe pass must never send it.
+	require(!headphones.hasUltMode() && std::none_of(observed->sentPayloads.begin(), observed->sentPayloads.end(),
+		[](const Buffer& p) { return p.size() >= 2 && (unsigned char)p[0] == 0x56 && p[1] == 0x03; }),
+		"v1 probe must not send the 56 03 ULT inquiry");
 
 	// --- v2 multipoint ("Connect to 2 devices"), byte layout proven by GadgetBridge on the WH-ULT900N
 	// (SonyProtocolImplV2 commits 8cbc309346, e8520865f3, 5d7b37d1b7) ---
@@ -361,6 +365,202 @@ int main()
 	zeros.requestAmbientState();
 	require(zeros.getAmbientSoundControl() && zeros.getAsmLevel() == 7, "a zeroed 67 17 reply overwrote the state");
 
+	// --- ULT mode (ULT WEAR), EQ inquired type 03: 57 03 <preset> <ult> <count> <bands...> ---
+	// Layout from Sound Connect's PRESET_EQ_AND_ULT_MODE (mos9527/SonyHeadphonesClient ProtocolV2T1.hpp).
+	{
+		Buffer ultReply = bytes({ 0x57, 0x03, 0xa0, 0x01, 0x06, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f });
+		auto fakeUlt = std::make_unique<FakeV2Connector>();
+		auto* observedUlt = fakeUlt.get();
+		observedUlt->reply = [&ultReply](const Buffer& request) -> Buffer {
+			if (request == bytes({ 0x56, 0x03 })) return ultReply;
+			return {};
+		};
+		BluetoothWrapper bluetoothUlt(std::move(fakeUlt));
+		Headphones ult(bluetoothUlt);
+		ult.setDeviceName("Sony ULT WEAR");
+		ult.probeCapabilities();
+		require(ult.hasUltMode() && ult.getUltMode() == ULT_MODE::ULT1, "57 03 a0 01 ... must parse as ULT 1");
+
+		// Diagnostics stay empty until the first multipoint read (macOS shows "loading" while empty), then
+		// carry the raw ULT exchange.
+		require(ult.getMultipointDiagnostics().empty(), "the ULT probe must not make the diagnostics non-empty");
+		ult.requestMultipoint();
+		require(ult.getMultipointDiagnostics().find("ult T1 56 03 -> 57 03 a0 01 06") != std::string::npos,
+			"the diagnostics must include the raw 56 03 exchange");
+
+		// The 57 03 reply is also the EQ state: clear bass first, then 400..16k.
+		require(ult.hasEqualizer() && ult.getEqualizerPreset() == EQ_PRESET::MANUAL
+			&& ult.getClearBass() == 0 && ult.getEqualizerBand(0) == 1 && ult.getEqualizerBand(4) == 5,
+			"57 03 a0 01 06 0a 0b 0c 0d 0e 0f must decode as clear bass 0, bands +1..+5");
+		observedUlt->sentPayloads.clear();
+		ult.requestEqualizer();
+		require(observedUlt->sent(bytes({ 0x56, 0x03 })) && !observedUlt->sent(bytes({ 0x56, 0x00 })),
+			"a ULT device's equalizer must be read through 56 03");
+		ult.setEqualizerCustom(3, { -2, -1, 0, 1, 2 });
+		require(observedUlt->sentPayloads.back() == bytes({ 0x58, 0x03, 0xa0, 0x01, 0x06, 0x0d, 0x08, 0x09, 0x0a, 0x0b, 0x0c }),
+			"ULT custom EQ must be 58 03 a0 <current ult> 06 <clear bass +10> <400..16k +10>");
+		require(ult.getClearBass() == 3 && ult.getEqualizerBand(0) == -2, "ULT custom EQ cache was not updated");
+
+		// Manual EQ: the custom curve is echoed back verbatim (count + bands), after a fresh read.
+		observedUlt->sentPayloads.clear();
+		ult.setUltMode(ULT_MODE::ULT2);
+		require(observedUlt->sentPayloads.size() == 2 && observedUlt->sentPayloads[0] == bytes({ 0x56, 0x03 }),
+			"setUltMode must re-read 56 03 right before writing");
+		require(observedUlt->sentPayloads[1] == bytes({ 0x58, 0x03, 0xa0, 0x02, 0x06, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f }),
+			"ULT 2 on Manual EQ must be 58 03 a0 02 <count + bands echoed verbatim>");
+		require(ult.getUltMode() == ULT_MODE::ULT2, "ULT mode cache was not updated after the write");
+
+		// The EQ changed elsewhere (now the Bright preset): the fresh read wins, and a preset carries no bands.
+		ultReply = bytes({ 0x57, 0x03, 0x10, 0x02, 0x06, 0x0a, 0x0a, 0x0a, 0x0a, 0x0a, 0x0a });
+		ult.setUltMode(ULT_MODE::OFF);
+		require(observedUlt->sentPayloads.back() == bytes({ 0x58, 0x03, 0x10, 0x00, 0x00 }),
+			"ULT off on a preset must be 58 03 <current preset> 00 00");
+
+		// The poll follows the physical button.
+		ultReply = bytes({ 0x57, 0x03, 0x10, 0x01, 0x00 });
+		ult.requestUltMode();
+		require(ult.getUltMode() == ULT_MODE::ULT1, "a ULT button change was not picked up by requestUltMode");
+
+		// Manual EQ but the reply lacks its bands: refuse rather than wipe the custom curve.
+		ultReply = bytes({ 0x57, 0x03, 0xa0, 0x01 });
+		size_t sentBefore = observedUlt->sentPayloads.size();
+		bool truncatedRejected = false;
+		try { ult.setUltMode(ULT_MODE::ULT2); } catch (const RecoverableException&) { truncatedRejected = true; }
+		require(truncatedRejected && observedUlt->sentPayloads.size() == sentBefore + 1
+			&& observedUlt->sentPayloads.back() == bytes({ 0x56, 0x03 }),
+			"setUltMode must not write when the Manual EQ reply has no bands");
+
+		// The link dies before the write: the transport's own exception (with shouldDisconnect) reaches the
+		// caller so the GUI drops the dead connection, nothing is written, and the diagnostics keep the last
+		// answered exchange next to the failure.
+		ultReply = {};
+		sentBefore = observedUlt->sentPayloads.size();
+		// (The fake's own timeout is a plain runtime_error; on a real link it is RecoverableException(..., true).)
+		std::string writeError;
+		try { ult.setUltMode(ULT_MODE::OFF); } catch (const std::exception& exc) { writeError = exc.what(); }
+		require(writeError == "fake connector has no queued response" && observedUlt->sentPayloads.size() == sentBefore + 1,
+			"a failed re-read must rethrow the transport's exception (not a fresh one) and send no 58 03");
+		auto diagnostics = ult.getMultipointDiagnostics();
+		require(diagnostics.find("ult T1 56 03 -> 57 03") != std::string::npos
+			&& diagnostics.find("ult T1 56 03 -> (") != std::string::npos,
+			"a ULT timeout must not hide the last answered exchange in the diagnostics");
+
+				// Captured from a ULT WEAR (fw 2.1.0). Its 57 00 showed the first five of these values one slot late, and
+		// writing the sixth byte here moved the treble, so: clear bass +7, then 400..16k.
+		// The device name alone makes the first equalizer read use 56 03 (never 56 00) on this model.
+		auto fakeCaptured = std::make_unique<FakeV2Connector>();
+		fakeCaptured->reply = [](const Buffer& request) -> Buffer {
+			if (request == bytes({ 0x56, 0x03 })) return bytes({ 0x57, 0x03, 0xa0, 0x01, 0x06, 0x11, 0x0c, 0x08, 0x0b, 0x0d, 0x0f });
+			return {};
+		};
+		auto* observedCaptured = fakeCaptured.get();
+		BluetoothWrapper bluetoothCaptured(std::move(fakeCaptured));
+		Headphones captured(bluetoothCaptured);
+		captured.setDeviceName("Sony ULT WEAR");
+		captured.requestEqualizer();
+		require(observedCaptured->sent(bytes({ 0x56, 0x03 })) && !observedCaptured->sent(bytes({ 0x56, 0x00 })),
+			"a ULT WEAR's first equalizer read must use 56 03, not the shifted 56 00");
+		require(captured.hasEqualizer() && captured.getClearBass() == 7 && captured.getEqualizerBand(0) == 2
+			&& captured.getEqualizerBand(1) == -2 && captured.getEqualizerBand(2) == 1 && captured.getEqualizerBand(3) == 3
+			&& captured.getEqualizerBand(4) == 5,
+			"captured ULT WEAR reply must decode as clear bass +7, then +2 -2 +1 +3 +5");
+
+				// Clear Bass on its own (Bass Control slider): fresh read, then the headset's own preset, ULT mode and
+		// five bands go back byte for byte with only the clear-bass byte replaced.
+		require(captured.hasUltClearBass(), "a 57 03 reply with six band bytes must enable Clear Bass control");
+		observedCaptured->sentPayloads.clear();
+		captured.setClearBass(-3);
+		require(observedCaptured->sentPayloads.size() == 2 && observedCaptured->sentPayloads[0] == bytes({ 0x56, 0x03 })
+			&& observedCaptured->sentPayloads[1] == bytes({ 0x58, 0x03, 0xa0, 0x01, 0x06, 0x07, 0x0c, 0x08, 0x0b, 0x0d, 0x0f }),
+			"Clear Bass -3 must be 58 03 a0 01 06 07 <400..16k echoed>");
+		require(captured.getClearBass() == -3, "Clear Bass cache was not updated");
+
+		// On a preset whose reply carries its curve, the preset byte goes back unchanged.
+		auto fakePreset = std::make_unique<FakeV2Connector>();
+		auto* observedPreset = fakePreset.get();
+		Buffer presetReply = bytes({ 0x57, 0x03, 0x10, 0x02, 0x06, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f });
+		fakePreset->reply = [&presetReply](const Buffer& request) -> Buffer {
+			if (request == bytes({ 0x56, 0x03 })) return presetReply;
+			return {};
+		};
+		BluetoothWrapper bluetoothPreset(std::move(fakePreset));
+		Headphones preset(bluetoothPreset);
+		preset.setDeviceName("Sony ULT WEAR");
+		preset.requestUltMode();
+		preset.setClearBass(25);
+		require(observedPreset->sentPayloads.back() == bytes({ 0x58, 0x03, 0x10, 0x02, 0x06, 0x14, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f }),
+			"Clear Bass on a preset must keep the preset and ULT bytes, clamp to +10");
+
+		// A reply without band bytes: refuse rather than guess the curve.
+		presetReply = bytes({ 0x57, 0x03, 0x10, 0x02, 0x00 });
+		size_t presetSent = observedPreset->sentPayloads.size();
+		bool noBandsRejected = false;
+		try { preset.setClearBass(1); } catch (const RecoverableException&) { noBandsRejected = true; }
+		require(noBandsRejected && observedPreset->sentPayloads.size() == presetSent + 1,
+			"Clear Bass must not write when the reply carries no band bytes");
+
+				// An unknown ULT status byte is not a ULT reply.
+		auto fakeOdd = std::make_unique<FakeV2Connector>();
+		fakeOdd->reply = [](const Buffer& request) -> Buffer {
+			if (request == bytes({ 0x56, 0x03 })) return bytes({ 0x57, 0x03, 0x00, 0x07, 0x00 });
+			return {};
+		};
+		BluetoothWrapper bluetoothOdd(std::move(fakeOdd));
+		Headphones odd(bluetoothOdd);
+		odd.setDeviceName("Sony ULT WEAR");
+		odd.requestUltMode();
+		require(!odd.hasUltMode(), "a ULT status past 02 must not be taken as ULT support");
+		bool oddCbRejected = false;
+		try { odd.setClearBass(1); } catch (const std::logic_error&) { oddCbRejected = true; }
+		require(!odd.hasUltClearBass() && oddCbRejected, "setClearBass must throw without the six-band ULT layout");
+
+		// A ULT WEAR that doesn't answer 56 03 never gets a 58 03.
+		auto fakeNoUlt = std::make_unique<FakeV2Connector>();
+		auto* observedNoUlt = fakeNoUlt.get();
+		BluetoothWrapper bluetoothNoUlt(std::move(fakeNoUlt));
+		Headphones noUlt(bluetoothNoUlt);
+		noUlt.setDeviceName("Sony ULT WEAR");
+		noUlt.probeCapabilities();
+		bool ultRejected = false;
+		try { noUlt.setUltMode(ULT_MODE::ULT1); } catch (const std::logic_error&) { ultRejected = true; }
+		require(!noUlt.hasUltMode() && ultRejected && std::none_of(observedNoUlt->sentPayloads.begin(),
+			observedNoUlt->sentPayloads.end(), [](const Buffer& p) { return p.size() >= 2 && (unsigned char)p[0] == 0x58; }),
+			"setUltMode must throw without sending on a device that never answered 56 03");
+	}
+
+	// --- ULT code is ULT WEAR only: other v2 models never see 56 03 / 58 03, even if they'd answer ---
+	for (const char* otherModel : { "WH-1000XM5", "WH-CH720N", "WF-1000XM5", "" })
+	{
+		auto fakeOther = std::make_unique<FakeV2Connector>();
+		auto* observedOther = fakeOther.get();
+		fakeOther->reply = [](const Buffer& request) -> Buffer {
+			if (request == bytes({ 0x56, 0x03 })) return bytes({ 0x57, 0x03, 0xa0, 0x01, 0x06, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f });
+			if (request == bytes({ 0x56, 0x00 })) return bytes({ 0x57, 0x00, 0xa0, 0x06, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f });
+			return {};
+		};
+		BluetoothWrapper bluetoothOther(std::move(fakeOther));
+		Headphones other(bluetoothOther);
+		other.setDeviceName(otherModel);
+		other.requestEqualizer();
+		require(other.getClearBass() == 0 && other.getEqualizerBand(0) == 1,
+			"a non-ULT model must keep decoding 57 00 as clear bass first");
+		other.probeCapabilities();
+		other.requestUltMode();
+		other.setEqualizerCustom(3, { -2, -1, 0, 1, 2 });
+		bool ultWriteRejected = false, clearBassRejected = false;
+		try { other.setUltMode(ULT_MODE::ULT1); } catch (const std::logic_error&) { ultWriteRejected = true; }
+		try { other.setClearBass(1); } catch (const std::logic_error&) { clearBassRejected = true; }
+		bool sentUlt = std::any_of(observedOther->sentPayloads.begin(), observedOther->sentPayloads.end(),
+			[](const Buffer& p) { return p.size() >= 2 && ((unsigned char)p[0] == 0x56 || (unsigned char)p[0] == 0x58) && p[1] == 0x03; });
+		require(!sentUlt && !other.hasUltMode() && !other.hasUltClearBass() && ultWriteRejected && clearBassRejected,
+			"a non-ULT model must never be sent 56 03 / 58 03 or offer ULT / Clear Bass control");
+		require(std::find(observedOther->sentPayloads.begin(), observedOther->sentPayloads.end(),
+				bytes({ 0x58, 0x00, 0xa0, 0x06, 0x0d, 0x08, 0x09, 0x0a, 0x0b, 0x0c })) != observedOther->sentPayloads.end(),
+			"a non-ULT model must keep writing custom EQ as 58 00 a0 06 <clear bass> <bands>");
+		require(other.getMultipointDiagnostics().empty() || other.getMultipointDiagnostics().find("ult ") == std::string::npos,
+			"a non-ULT model's diagnostics must not mention ULT");
+	}
+
 	// Malformed inbound frames on the untrusted parser path must throw the recoverable type.
 	// 61 (0x3D) is the escape sentry; a lone one at buffer end and one followed by a
 	// non-escapable byte are the two unescape rejection paths.
@@ -372,6 +572,6 @@ int main()
 	expectRecoverable([] { CommandSerializer::unpackBtMessage(Buffer{ 0x00, 0x00, 0x00 }); },
 		"under-minimum-size frame did not throw RecoverableException");
 
-	std::cout << "XM4 / multipoint / XM6 protocol tests passed\n";
+	std::cout << "XM4 / multipoint / XM6 / ULT mode protocol tests passed\n";
 	return 0;
 }

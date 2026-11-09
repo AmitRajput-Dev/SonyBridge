@@ -7,6 +7,23 @@
 #include <algorithm>
 #include <cctype>
 
+namespace
+{
+	std::string hexString(const Buffer& bytes)
+	{
+		static const char digits[] = "0123456789abcdef";
+		std::string out;
+		for (size_t i = 0; i < bytes.size(); i++)
+		{
+			auto b = (unsigned char)bytes[i];
+			if (i > 0) out += ' ';
+			out += digits[b >> 4];
+			out += digits[b & 0x0f];
+		}
+		return out;
+	}
+}
+
 Headphones::Headphones(BluetoothWrapper& conn) : _conn(conn)
 {
 }
@@ -265,6 +282,8 @@ bool Headphones::isBatteryCaseCharging() { std::lock_guard guard(this->_property
 void Headphones::requestEqualizer()
 {
 	auto isV1 = this->_conn.getProtocolVersion() == SonyProtocolVersion::V1;
+	// ULT WEAR: read through 56 03 instead (its 57 00 slots are shifted by one).
+	if (this->_isUltWear() && this->_requestUltEqualizer()) return;
 	if (!isV1 && this->_isWh1000Xm6())
 	{
 		// GET 56 04 -> RET 57 04 <preset> <count=0a> <b1..b10>, raw device steps 0..12 with no bias and no
@@ -352,6 +371,12 @@ void Headphones::setEqualizerCustom(int clearBass, const std::vector<int>& bands
 {
 	if (!this->hasEqualizer()) throw std::logic_error("Equalizer capability has not been confirmed");
 	auto isV1 = this->_conn.getProtocolVersion() == SonyProtocolVersion::V1;
+	// ULT WEAR: write through 58 03 instead (its 58 00 slots are shifted by one, and clear bass is ignored).
+	if (this->_isUltWear() && this->hasUltClearBass())
+	{
+		this->_setUltEqualizerCustom(clearBass, bands);
+		return;
+	}
 	if (!isV1 && this->_isWh1000Xm6())
 	{
 		// SET 58 04 a0 <count> <b1..bN>, raw 0..12, no clear-bass slot.
@@ -454,6 +479,173 @@ void Headphones::setDsee(bool enabled)
 	}
 	std::lock_guard guard(this->_propertyMtx);
 	this->_dsee = enabled;
+}
+
+// --- ULT WEAR (WH-ULT900N) only: ULT mode, Clear Bass, and its equalizer path ---
+// Nothing below runs for any other model: _readUltModeParam() is the only sender of 56 03 and bails out unless
+// _isUltWear(), and every 58 03 write needs a confirmed 56 03 reply first.
+
+bool Headphones::_isUltWear() const
+{
+	if (this->_conn.getProtocolVersion() != SonyProtocolVersion::V2) return false;
+	std::string name;
+	for (char c : this->_deviceName) name.push_back((char)std::tolower((unsigned char)c));
+	// Matches "Sony ULT WEAR", "ULT WEAR", "WH-ULT900N" (Gadgetbridge matches ^Sony ULT|ULT WEAR).
+	return name.rfind("sony ult", 0) == 0 || name.find("ult wear") != std::string::npos
+		|| name.find("ult900") != std::string::npos;
+}
+
+bool Headphones::_readUltModeParam(Buffer& replyOut, bool rethrow)
+{
+	if (!this->_isUltWear()) return false;
+	const Buffer request = { (char)V2Command::EQ_GET, (char)V2Command::EQ_ULT_MODE };
+	Buffer resp;
+	try
+	{
+		resp = this->_conn.sendCommandAndReadResponse(request, V2Command::EQ_RET, V2Command::EQ_ULT_MODE);
+	}
+	catch (const std::exception& exc)
+	{
+		{
+			std::lock_guard guard(this->_propertyMtx);
+			this->_ultModeLog = this->_ultModeLastOk + "T1 " + hexString(request) + " -> (" + exc.what() + ")\n";
+		}
+		if (rethrow) throw;
+		return false;
+	}
+
+	std::lock_guard guard(this->_propertyMtx);
+	this->_ultModeLastOk = "T1 " + hexString(request) + " -> " + hexString(resp) + "\n";
+	this->_ultModeLog = this->_ultModeLastOk;
+	// 57 03 <preset> <ult> [<count> <band bytes...>]. Only the first four bytes are needed to know the mode;
+	// anything past 02 is not a ULT status we know, so the reply isn't taken as one.
+	if (resp.size() < 4 || (unsigned char)resp[3] > (unsigned char)ULT_MODE::ULT2) return false;
+	this->_hasUltMode = true;
+	this->_ultMode = static_cast<ULT_MODE>((unsigned char)resp[3]);
+	// With the full curve attached (count 06: clear bass then 400..16k, each +10), this reply is also the
+	// equalizer state - the one place a ULT WEAR reports it in the right slots.
+	if (resp.size() >= 5 + (size_t)V2Command::EQ_ULT_BAND_COUNT && (unsigned char)resp[4] == V2Command::EQ_ULT_BAND_COUNT)
+	{
+		this->_ultEqLayout = true;
+		this->_hasEqualizer = true;
+		this->_eqPreset = static_cast<EQ_PRESET>((unsigned char)resp[2]);
+		this->_eqClearBass = (unsigned char)resp[5] - 10;
+		this->_eqBands.assign(5, 0);
+		for (int i = 0; i < 5; i++) this->_eqBands[i] = (unsigned char)resp[6 + i] - 10;
+	}
+	replyOut = resp;
+	return true;
+}
+
+bool Headphones::_requestUltEqualizer()
+{
+	bool layoutKnown;
+	{
+		std::lock_guard guard(this->_propertyMtx);
+		layoutKnown = this->_ultEqLayout;
+	}
+	Buffer reply;
+	if (layoutKnown)
+	{
+		// _readUltModeParam() refreshes the EQ cache; a transport failure propagates like the 56 00 read's.
+		this->_readUltModeParam(reply, true);
+		return true;
+	}
+	// First read, before probeCapabilities() has run: try 56 03 so the sliders never show the shifted 57 00
+	// slots and a Manual write can't go out through 58 00. No band bytes -> the caller falls back to 56 00.
+	this->_readUltModeParam(reply);
+	std::lock_guard guard(this->_propertyMtx);
+	return this->_ultEqLayout;
+}
+
+void Headphones::_setUltEqualizerCustom(int clearBass, const std::vector<int>& bands)
+{
+	// SET 58 03 a0 <ult> 06 <clear bass +10> <400..16k +10>. The SET carries the ULT mode too; the cached one is
+	// kept current by the 2 s poll, which is fresh enough for a slider drag (re-reading per write would halve its
+	// rate).
+	ULT_MODE ultMode;
+	{
+		std::lock_guard guard(this->_propertyMtx);
+		ultMode = this->_ultMode;
+	}
+	auto bias = [](int v) { return (char)(unsigned char)(std::clamp(v, -10, 10) + 10); };
+	Buffer cmd = { (char)V2Command::EQ_SET, (char)V2Command::EQ_ULT_MODE,
+		(char)static_cast<unsigned char>(EQ_PRESET::MANUAL), (char)(unsigned char)ultMode,
+		(char)V2Command::EQ_ULT_BAND_COUNT, bias(clearBass) };
+	for (int i = 0; i < 5; i++) cmd.push_back(bias(i < (int)bands.size() ? bands[i] : 0));
+	this->_conn.sendCommand(cmd);
+
+	std::lock_guard guard(this->_propertyMtx);
+	this->_eqPreset = EQ_PRESET::MANUAL;
+	this->_eqClearBass = std::clamp(clearBass, -10, 10);
+	this->_eqBands.assign(5, 0);
+	for (int i = 0; i < 5; i++) this->_eqBands[i] = std::clamp(i < (int)bands.size() ? bands[i] : 0, -10, 10);
+}
+
+void Headphones::requestUltMode()
+{
+	Buffer reply;
+	this->_readUltModeParam(reply);
+}
+
+bool Headphones::hasUltMode() { std::lock_guard guard(this->_propertyMtx); return this->_hasUltMode; }
+bool Headphones::hasUltClearBass() { std::lock_guard guard(this->_propertyMtx); return this->_ultEqLayout; }
+
+void Headphones::setClearBass(int clearBass)
+{
+	if (!this->hasUltClearBass()) throw std::logic_error("Clear bass capability has not been confirmed");
+
+	// Fresh read: the SET carries the preset, ULT mode and the other five bands, any of which may have changed
+	// since (ULT button, the phone app). Those go back byte for byte; only the clear-bass byte is ours.
+	Buffer current;
+	if (!this->_readUltModeParam(current, true))
+		throw RecoverableException("The headset didn't report its current equalizer, so Clear Bass wasn't changed.");
+	const size_t count = V2Command::EQ_ULT_BAND_COUNT;
+	if (current.size() < 5 + count || (unsigned char)current[4] != count)
+		throw RecoverableException("Clear Bass can't be changed with the current equalizer preset.");
+
+	Buffer cmd = { (char)V2Command::EQ_SET, (char)V2Command::EQ_ULT_MODE, current[2], current[3], current[4],
+		(char)(unsigned char)(std::clamp(clearBass, -10, 10) + 10) };
+	cmd.insert(cmd.end(), current.begin() + 6, current.begin() + 5 + count);
+	this->_conn.sendCommand(cmd);
+
+	std::lock_guard guard(this->_propertyMtx);
+	this->_eqClearBass = std::clamp(clearBass, -10, 10);
+}
+ULT_MODE Headphones::getUltMode() { std::lock_guard guard(this->_propertyMtx); return this->_ultMode; }
+
+void Headphones::setUltMode(ULT_MODE mode)
+{
+	if (!this->hasUltMode()) throw std::logic_error("ULT mode capability has not been confirmed");
+	if ((unsigned char)mode > (unsigned char)ULT_MODE::ULT2) throw std::invalid_argument("Invalid ULT mode");
+
+	// The SET carries the EQ preset (and, for Manual, the custom curve) alongside the ULT byte. The EQ may
+	// have changed since the last read - through the 58 00 path, or on the phone - so re-read it right
+	// before writing; a stale copy would silently put the user's old EQ back.
+	// A dead link rethrows the transport's own exception, so callers still see its shouldDisconnect.
+	Buffer current;
+	if (!this->_readUltModeParam(current, true))
+		throw RecoverableException("The headset didn't report its current equalizer, so ULT mode wasn't changed.");
+
+	auto preset = (unsigned char)current[2];
+	Buffer cmd = { (char)V2Command::EQ_SET, (char)V2Command::EQ_ULT_MODE, (char)preset, (char)(unsigned char)mode };
+	if (preset == (unsigned char)EQ_PRESET::MANUAL)
+	{
+		// Echo the stored custom curve back byte for byte (count + bands), never a re-encoded copy.
+		size_t count = current.size() > 4 ? (unsigned char)current[4] : 0;
+		if (current.size() < 5 || current.size() < 5 + count)
+			throw RecoverableException("The headset's equalizer reply was incomplete, so ULT mode wasn't changed.");
+		cmd.insert(cmd.end(), current.begin() + 4, current.begin() + 5 + count);
+	}
+	else
+	{
+		// Presets carry no bands, as in the 58 00 <preset> 00 form.
+		cmd.push_back(0x00);
+	}
+	this->_conn.sendCommand(cmd);
+
+	std::lock_guard guard(this->_propertyMtx);
+	this->_ultMode = mode;
 }
 
 void Headphones::requestAmbientState()
@@ -602,6 +794,12 @@ void Headphones::probeCapabilities()
 		auto r = this->_conn.sendCommandAndReadResponse({ (char)V2Command::BTNMODE_GET, (char)V2Command::SUB_SPEAK_TO_CHAT }, V2Command::BTNMODE_RET, V2Command::SUB_SPEAK_TO_CHAT);
 		if (r.size() >= 3) { std::lock_guard g(this->_propertyMtx); this->_speakToChat = (r[2] == 0); this->_hasSpeakToChat = true; }
 	} catch (...) {}
+
+	// ULT mode + Clear Bass: ULT WEAR only (read-only, and never sent to any other model).
+	if (this->_isUltWear())
+	{
+		try { this->requestUltMode(); } catch (...) {}
+	}
 }
 
 bool Headphones::hasAutoPowerOff() { std::lock_guard guard(this->_propertyMtx); return this->_hasAutoPowerOff; }
@@ -661,20 +859,6 @@ void Headphones::setAdaptiveVolume(bool enabled)
 
 namespace
 {
-	std::string hexString(const Buffer& bytes)
-	{
-		static const char digits[] = "0123456789abcdef";
-		std::string out;
-		for (size_t i = 0; i < bytes.size(); i++)
-		{
-			auto b = (unsigned char)bytes[i];
-			if (i > 0) out += ' ';
-			out += digits[b >> 4];
-			out += digits[b & 0x0f];
-		}
-		return out;
-	}
-
 	// 37 <type> <count> { <address, 17 ASCII> <slot> [<class of device, 3 bytes BE>] <name length> <name> } x count <playback slot>
 	// Returns false (and leaves `out` untouched) on any length mismatch, so a misread never reaches the UI.
 	bool parsePairedDevices(const Buffer& resp, bool withClassOfDevice, std::vector<PairedDevice>& out)
@@ -936,7 +1120,23 @@ bool Headphones::hasPlaybackPinState() { std::lock_guard g(this->_propertyMtx); 
 bool Headphones::isPlaybackPinned() { std::lock_guard g(this->_propertyMtx); return this->_playbackPinned; }
 bool Headphones::hasMultipointSetting() { std::lock_guard g(this->_propertyMtx); return this->_hasMultipointSetting; }
 bool Headphones::getMultipointEnabled() { std::lock_guard g(this->_propertyMtx); return this->_multipointEnabled; }
-std::string Headphones::getMultipointDiagnostics() { std::lock_guard g(this->_propertyMtx); return this->_multipointDiagnostics; }
+std::string Headphones::getMultipointDiagnostics()
+{
+	std::lock_guard g(this->_propertyMtx);
+	// Stays empty until the first multipoint read has finished (the UI treats empty as "still loading"); after
+	// that it also carries the ULT-mode exchanges, which is useful when bringing ULT up on a new model.
+	if (this->_multipointDiagnostics.empty()) return this->_multipointDiagnostics;
+	std::string ult;
+	size_t start = 0;
+	while (start < this->_ultModeLog.size())
+	{
+		size_t end = this->_ultModeLog.find('\n', start);
+		if (end == std::string::npos) end = this->_ultModeLog.size();
+		ult += "ult " + this->_ultModeLog.substr(start, end - start) + "\n";
+		start = end + 1;
+	}
+	return this->_multipointDiagnostics + ult;
+}
 
 void Headphones::setMultipoint(bool enabled)
 {

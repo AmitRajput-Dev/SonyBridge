@@ -50,6 +50,7 @@ bool CrossPlatformGUI::performGUIPass()
 			this->_drawASMControls();
 			if (this->_isV2())
 			{
+				this->_drawUltMode();
 				this->_drawEqualizer();
 				this->_drawDsee();
 			}
@@ -228,6 +229,15 @@ void CrossPlatformGUI::_pumpConnectionState()
 		this->_uiAutoPowerOff = this->_headphones.getAutoPowerOff();
 		this->_uiSpeakToChat = this->_headphones.getSpeakToChat();
 		this->_uiAdaptiveVolume = this->_headphones.getAdaptiveVolume();
+		this->_uiUltMode = (int)this->_headphones.getUltMode();
+		// On ULT devices the probe's 57 03 read is the first to carry the real clear bass (57 00 doesn't).
+		if (this->_headphones.hasUltMode() && !this->_featureCommandFuture.valid())
+		{
+			this->_uiEqPreset = (int)(unsigned char)this->_headphones.getEqualizerPreset();
+			for (int i = 0; i < 5; ++i)
+				this->_uiEqBands[i] = this->_headphones.getEqualizerBand(i);
+			this->_uiClearBass = this->_headphones.getClearBass();
+		}
 	}
 
 	// Poll the button-changeable ASM state so the app reflects changes made on the headphone itself.
@@ -242,6 +252,13 @@ void CrossPlatformGUI::_pumpConnectionState()
 			if (lvl > 0) this->_uiAsmLevel = lvl;
 			this->_uiFocusOnVoice = this->_headphones.getFocusOnVoice();
 		}
+		// The ULT button changes ULT mode on the headset; don't let a read that predates a pending write win.
+		if (!this->_featureCommandFuture.valid() && !this->_ultModeNeedsSync)
+			this->_uiUltMode = (int)this->_headphones.getUltMode();
+		// The same read carries clear bass (e.g. changed in the phone app); leave it alone mid-drag or mid-write.
+		if (this->_headphones.hasUltClearBass() && !this->_featureCommandFuture.valid() && !this->_clearBassDirty
+			&& !ImGui::IsAnyItemActive())
+			this->_uiClearBass = this->_headphones.getClearBass();
 	}
 	if (!this->_pollFuture.valid() && ++this->_pollCounter >= DYNAMIC_POLL_FRAMES)
 	{
@@ -260,6 +277,11 @@ void CrossPlatformGUI::_pumpConnectionState()
 
 		this->_pollFuture.setFromAsync([this, withBattery]() {
 			this->_headphones.requestAmbientState();
+			// ULT devices only: the probe (phase 2) decides, so other headsets never see this inquiry.
+			if (this->_headphones.hasUltMode())
+			{
+				try { this->_headphones.requestUltMode(); } catch (const std::exception&) {}
+			}
 			// Best effort: a device that doesn't answer the battery inquiry must not kill the poll.
 			if (withBattery)
 			{
@@ -282,6 +304,7 @@ void CrossPlatformGUI::_syncUIFromHeadphones()
 		this->_uiEqBands[i] = this->_headphones.getEqualizerBand(i);
 	this->_uiClearBass = this->_headphones.getClearBass();
 	this->_uiDsee = this->_headphones.getDsee();
+	this->_uiUltMode = (int)this->_headphones.getUltMode();
 
 	this->_uiAutoPowerOff = this->_headphones.getAutoPowerOff();
 	this->_uiSpeakToChat = this->_headphones.getSpeakToChat();
@@ -464,6 +487,44 @@ void CrossPlatformGUI::_drawASMControls()
 	this->_endCard();
 }
 
+void CrossPlatformGUI::_drawUltMode()
+{
+	// Only shown once probeCapabilities() saw the headset answer the ULT read (ULT WEAR).
+	if (!this->_headphones.hasUltMode()) return;
+	if (!this->_beginCard("##ult")) { this->_endCard(); return; }
+	// Sound Connect's "Bass Control" on the ULT WEAR: the ULT mode (same as the ULT button) plus Clear Bass.
+	this->_cardTitle("Bass Control");
+	ImGui::TextDisabled("ULT mode, same as the ULT button");
+
+	static const struct { const char* name; int val; } modes[] = { { "Off", 0 }, { "ULT 1", 1 }, { "ULT 2", 2 } };
+	const float spacing = ImGui::GetStyle().ItemSpacing.x;
+	const float cellW = (ImGui::GetContentRegionAvail().x - spacing * 2.f) / 3.f;
+	for (int i = 0; i < 3; ++i)
+	{
+		if (i) ImGui::SameLine();
+		bool sel = this->_uiUltMode == modes[i].val;
+		if (sel) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyle().Colors[ImGuiCol_ButtonActive]);
+		if (ImGui::Button(modes[i].name, ImVec2(cellW, 0)) && !sel)
+		{
+			this->_uiUltMode = modes[i].val;
+			this->_ultModeNeedsSync = true;
+			ULT_MODE mode = (ULT_MODE)modes[i].val;
+			this->_sendFeatureCommand([this, mode]() { this->_headphones.setUltMode(mode); });
+		}
+		if (sel) ImGui::PopStyleColor();
+	}
+
+	if (this->_headphones.hasUltClearBass())
+	{
+		ImGui::Spacing();
+		ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+		if (ImGui::SliderInt("##clearbass", &this->_uiClearBass, -10, 10, "Clear Bass   %+d"))
+			this->_clearBassDirty = true;
+	}
+
+	this->_endCard();
+}
+
 void CrossPlatformGUI::_drawEqualizer()
 {
 	if (!this->_beginCard("##eq")) { this->_endCard(); return; }
@@ -500,7 +561,8 @@ void CrossPlatformGUI::_drawEqualizer()
 		int* values[] = { &this->_uiClearBass, &this->_uiEqBands[0], &this->_uiEqBands[1],
 						  &this->_uiEqBands[2], &this->_uiEqBands[3], &this->_uiEqBands[4] };
 		bool changed = false;
-		for (int i = 0; i < 6; ++i)
+		// On the ULT WEAR clear bass sits in the Bass Control card instead, as in Sony's app.
+		for (int i = this->_headphones.hasUltClearBass() ? 1 : 0; i < 6; ++i)
 		{
 			std::string id = "##eqband" + std::to_string(i);
 			std::string fmt = std::string(bandNames[i]) + "   %+d";
@@ -617,6 +679,19 @@ void CrossPlatformGUI::_sendPendingASMChanges()
 				this->_uiEqBands[i] = this->_headphones.getEqualizerBand(i);
 			this->_uiClearBass = this->_headphones.getClearBass();
 		}
+	}
+	// A ULT click is synced back once no feature write is in flight: on success the device's mode is the one
+	// clicked, on failure (or a click dropped while the worker was busy) it's what the headset really has.
+	if (this->_clearBassDirty && !this->_featureCommandFuture.valid())
+	{
+		this->_clearBassDirty = false;
+		int cb = this->_uiClearBass;
+		this->_sendFeatureCommand([this, cb]() { this->_headphones.setClearBass(cb); });
+	}
+	if (this->_ultModeNeedsSync && !this->_featureCommandFuture.valid())
+	{
+		this->_ultModeNeedsSync = false;
+		this->_uiUltMode = (int)this->_headphones.getUltMode();
 	}
 
 	if (this->_sendCommandFuture.valid() && this->_sendCommandFuture.ready())

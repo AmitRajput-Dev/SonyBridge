@@ -80,6 +80,21 @@ public:
 	int getEqualizerBandCount();
 	bool isTenBandEqualizer();
 
+	// ULT bass mode (v2, ULT WEAR). requestUltMode() is the read-only probe (run from probeCapabilities()) and
+	// the poll; hasUltMode() is true only once the device answered it. setUltMode() re-reads the EQ preset first
+	// (the SET carries it) and throws without sending unless the probe succeeded.
+	// Once a 57 03 reply has carried the six band bytes, the equalizer is read and its custom curve written
+	// through 56/58 03 as well: on the ULT WEAR that's the only path that reaches clear bass.
+	void requestUltMode();
+	bool hasUltMode();
+	ULT_MODE getUltMode();
+	void setUltMode(ULT_MODE mode);
+	// Clear bass on its own - Sound Connect's "Bass Control" slider on the ULT WEAR (-10..10). Needs the 56/58 03
+	// layout. Re-reads 56 03 and sends back the headset's own preset, ULT mode and bands, changing only clear
+	// bass; throws without sending if that reply carries no band bytes (getClearBass() is the source of truth).
+	bool hasUltClearBass();
+	void setClearBass(int clearBass);
+
 	// DSEE / audio upsampling.
 	void requestDsee();
 	bool hasDsee();
@@ -174,6 +189,24 @@ private:
 	int _eqClearBass = 0;
 	bool _dsee = false;
 	bool _hasDsee = false;
+
+	// --- ULT WEAR (WH-ULT900N) only. Every 56/58 03 frame goes through these, and _readUltModeParam() refuses
+	// to send unless _isUltWear(), so no other model ever sees the ULT inquiry. ---
+	// v2 and a ULT WEAR name ("Sony ULT WEAR", "ULT WEAR", "WH-ULT900N"), like _isWh1000Xm6() for the XM6.
+	bool _isUltWear() const;
+	// Reads 56 03. Returns false (state untouched) on any other model or if the reply isn't a ULT reply. A
+	// transport failure returns false too, unless rethrow is set - writes need the original exception (it
+	// carries shouldDisconnect).
+	bool _readUltModeParam(Buffer& replyOut, bool rethrow = false);
+	// requestEqualizer() / setEqualizerCustom() on the ULT WEAR, whose 56/58 00 slots are shifted by one.
+	// _requestUltEqualizer() returns false if the 03 layout isn't confirmed (caller falls back to 56 00).
+	bool _requestUltEqualizer();
+	void _setUltEqualizerCustom(int clearBass, const std::vector<int>& bands);
+	bool _hasUltMode = false;
+	ULT_MODE _ultMode = ULT_MODE::OFF;
+	bool _ultEqLayout = false; // a 57 03 reply carried <count=06> + six band bytes (EQ goes through 56/58 03)
+	std::string _ultModeLastOk; // hex of the last answered 56 03, kept so a later timeout doesn't hide it
+	std::string _ultModeLog;    // what the diagnostics show: last answered exchange + the latest failure, if any
 
 	bool _hasAutoPowerOff = false; int _autoPowerOff = 0;
 	bool _hasFirmware = false; std::string _firmware;

@@ -79,12 +79,15 @@ struct QuickControlsView: View {
             }
         }
 
-        if model.supportsEqualizer || model.hasPlaybackPinState {
+        if model.supportsUltMode || model.supportsEqualizer || model.hasPlaybackPinState {
             VStack(alignment: .leading, spacing: 12) {
+                if model.supportsUltMode {
+                    ultRow
+                }
                 if model.supportsEqualizer {
                     equalizerRow
                 }
-                if model.supportsEqualizer && model.hasPlaybackPinState {
+                if (model.supportsUltMode || model.supportsEqualizer) && model.hasPlaybackPinState {
                     Divider().background(palette.cardStroke)
                 }
                 if model.hasPlaybackPinState {
@@ -95,6 +98,27 @@ struct QuickControlsView: View {
         }
 
         errorText
+    }
+
+    private var ultRow: some View {
+        HStack {
+            Text("ULT")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(palette.primary)
+            Spacer()
+            Picker("ULT", selection: Binding(
+                get: { model.ultMode },
+                set: { model.setUltMode($0) }
+            )) {
+                ForEach(ULTModes.list, id: \.1) { option in
+                    Text(option.0).tag(option.1)
+                }
+            }
+            .pickerStyle(MenuPickerStyle())
+            .labelsHidden()
+            .frame(width: 120)
+            .accentColor(palette.accent)
+        }
     }
 
     private var equalizerRow: some View {
