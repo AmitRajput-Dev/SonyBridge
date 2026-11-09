@@ -57,6 +57,9 @@ typedef NS_ENUM(NSInteger, SHCAmbientMode) {
 @property (nonatomic, readonly) BOOL tenBandEqualizer;   // WH-1000XM6: raw 0..12 bands, no clear bass
 @property (nonatomic, readonly) BOOL supportsDsee;        // true after a successful read-only probe
 @property (nonatomic, readonly) BOOL dsee;                // DSEE / audio upsampling
+@property (nonatomic, readonly) BOOL supportsUltMode;     // ULT WEAR: true once the device answered the ULT read
+@property (nonatomic, readonly) NSInteger ultMode;        // 0 = Off, 1 = ULT 1, 2 = ULT 2
+@property (nonatomic, readonly) BOOL supportsClearBassControl; // ULT WEAR: clear bass settable on its own (-10..10)
 
 // Optional features (present only if the device answered the capability probe on connect).
 @property (nonatomic, readonly) BOOL hasAutoPowerOff;
@@ -105,6 +108,12 @@ typedef NS_ENUM(NSInteger, SHCAmbientMode) {
 
 // Toggles DSEE / audio upsampling.
 - (void)setDsee:(BOOL)enabled completion:(void (^)(BOOL ok, NSString * _Nullable error))completion;
+
+// Sets the ULT bass mode (0 = Off, 1 = ULT 1, 2 = ULT 2), the same setting the headset's ULT button cycles.
+- (void)setUltMode:(NSInteger)mode completion:(void (^)(BOOL ok, NSString * _Nullable error))completion;
+
+// Sets clear bass (-10..10) alone, keeping the headset's preset, ULT mode and bands. Read back via clearBass.
+- (void)setClearBass:(NSInteger)value completion:(void (^)(BOOL ok, NSString * _Nullable error))completion;
 
 - (void)setAutoPowerOff:(NSInteger)index completion:(void (^)(BOOL ok, NSString * _Nullable error))completion;
 - (void)setSpeakToChat:(BOOL)enabled completion:(void (^)(BOOL ok, NSString * _Nullable error))completion;

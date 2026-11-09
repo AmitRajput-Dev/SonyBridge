@@ -140,6 +140,10 @@ static NSString *SHCNormalizedAddress(NSString *address) {
     return _hp && _hp->hasDsee();
 }
 
+- (BOOL)supportsUltMode { return _hp && _hp->hasUltMode(); }
+- (NSInteger)ultMode { return _hp ? (NSInteger)_hp->getUltMode() : 0; }
+- (BOOL)supportsClearBassControl { return _hp && _hp->hasUltClearBass(); }
+
 - (NSInteger)equalizerBandCount {
     return _hp ? _hp->getEqualizerBandCount() : 5;
 }
@@ -395,9 +399,13 @@ static NSString *_Nullable SHCSourceSwitchError(int result) {
     auto hp = _hp;
     BOOL isV2 = _bt->getProtocolVersion() == SonyProtocolVersion::V2;
     dispatch_async(_cmdQueue, ^{
-        // The headphone's physical button only changes ambient/NC, so that's all we poll (keeps traffic low).
+        // Only button-changeable state is polled (keeps traffic low): ambient/NC, plus ULT mode below.
         // requestAmbientState() is protocol-aware (v2 uses 66 17, v1 uses 66 02), so this is safe on both.
         try { hp->requestAmbientState(); } catch (std::exception &exc) {}
+        // The ULT button changes the ULT mode on the headset itself, so follow it too (ULT devices only).
+        if (hp->hasUltMode()) {
+            try { hp->requestUltMode(); } catch (std::exception &exc) {}
+        }
         // Battery drains, earbuds get docked and the case charges them, so re-read it too - but only
         // every Nth poll, since it costs up to three inquiries on TWS. v2 only: 0x22 is POWER_OFF on v1.
         if (isV2 && self->_dynamicTick++ % kBatteryPollEveryNTicks == 0) {
@@ -460,6 +468,41 @@ static NSString *_Nullable SHCSourceSwitchError(int result) {
         NSString *error = nil; BOOL ok = YES;
         try {
             hp->setDsee(enabled);
+        } catch (std::exception &exc) { ok = NO; error = @(exc.what()); }
+        dispatch_async(dispatch_get_main_queue(), ^{ completion(ok, error); });
+    });
+}
+
+- (void)setUltMode:(NSInteger)mode completion:(void (^)(BOOL, NSString * _Nullable))completion {
+    if (!_hp || !self.connected || !_hp->hasUltMode()) {
+        completion(NO, @"ULT mode isn't supported on this device.");
+        return;
+    }
+    if (mode < 0 || mode > 2) {
+        completion(NO, @"Invalid ULT mode.");
+        return;
+    }
+    auto hp = _hp;
+    dispatch_async(_cmdQueue, ^{
+        NSString *error = nil; BOOL ok = YES;
+        try {
+            hp->setUltMode(static_cast<ULT_MODE>((unsigned char)mode));
+        } catch (std::exception &exc) { ok = NO; error = @(exc.what()); }
+        dispatch_async(dispatch_get_main_queue(), ^{ completion(ok, error); });
+    });
+}
+
+- (void)setClearBass:(NSInteger)value completion:(void (^)(BOOL, NSString * _Nullable))completion {
+    if (!_hp || !self.connected || !_hp->hasUltClearBass()) {
+        completion(NO, @"Clear Bass isn't adjustable on this device.");
+        return;
+    }
+    int cvalue = (int)MAX(-10, MIN(10, value));
+    auto hp = _hp;
+    dispatch_async(_cmdQueue, ^{
+        NSString *error = nil; BOOL ok = YES;
+        try {
+            hp->setClearBass(cvalue);
         } catch (std::exception &exc) { ok = NO; error = @(exc.what()); }
         dispatch_async(dispatch_get_main_queue(), ^{ completion(ok, error); });
     });

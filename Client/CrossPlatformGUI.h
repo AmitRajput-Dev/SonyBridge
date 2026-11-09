@@ -45,6 +45,7 @@ private:
 	void _drawDeviceDiscovery();
 	void _drawStatusHeader();
 	void _drawASMControls();
+	void _drawUltMode();
 	void _drawEqualizer();
 	void _drawDsee();
 	void _drawOptionalFeatures();
@@ -98,6 +99,13 @@ private:
 	// that preset once it completes instead of keeping the previous preset's.
 	bool _eqBandsNeedSync = false;
 	bool _uiDsee = false;
+	int _uiUltMode = 0;          // 0 = Off, 1 = ULT 1, 2 = ULT 2
+	// Set when a ULT write was requested, so the control takes the device's value once the feature worker
+	// is done (or immediately falls back to it if the click was dropped because the worker was busy).
+	bool _ultModeNeedsSync = false;
+	// Set when the Clear Bass slider moved and the value hasn't been handed to the worker yet; the latest value
+	// is sent as soon as the worker is free, so the last position of a drag always reaches the headset.
+	bool _clearBassDirty = false;
 	int _uiAutoPowerOff = 0;
 	bool _uiSpeakToChat = false;
 	bool _uiAdaptiveVolume = false;

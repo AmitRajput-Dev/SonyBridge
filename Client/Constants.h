@@ -113,6 +113,18 @@ namespace V2Command
 	inline constexpr unsigned char NCASM_TYPE_XM6 = 0x19;
 	// Ten-band equalizer inquired type (WH-1000XM6): 56/57/58 04, 10 raw bands 0..12, no clear bass.
 	inline constexpr unsigned char EQ_TEN_BAND    = 0x04;
+	// EQ + ULT mode inquired type (ULT WEAR / WH-ULT900N): the ULT button's bass mode lives next to the EQ.
+	//   GET 56 03  ->  RET 57 03 <preset> <ult 00=off 01=ULT1 02=ULT2> <count=06> <clear bass +10> <400..16k +10>
+	//   SET 58 03 <preset> <ult> <count> <band bytes...>
+	// Framing from Sound Connect's EqEbbInquiredType::PRESET_EQ_AND_ULT_MODE / EqParamUltMode, as generated in
+	// mos9527/SonyHeadphonesClient (libmdr ProtocolV2T1.hpp). Only sent after the device answered the GET.
+	// Verified on a ULT WEAR (fw 2.1.0): 56/58 03 use the usual clear-bass-first order, but this device's 00
+	// form is one slot off. Its 57 00 reported <x> <clear bass> <400> <1k> <2.5k> <6.3k> (57 03 read
+	// 57 03 a0 01 06 11 0c 08 0b 0d 0f while 57 00 decoded "400..16k" as +7 +2 -2 +1 +3), the 58 00 clear-bass
+	// slot changed nothing, and writing the sixth 58 03 byte moved the treble. So on ULT devices the EQ is
+	// read and written through 56/58 03 only (presets still use 58 00 <preset> 00).
+	inline constexpr unsigned char EQ_ULT_MODE    = 0x03;
+	inline constexpr unsigned char EQ_ULT_BAND_COUNT = 0x06; // five bands + clear bass
 	// INIT_REPLY layout: 01 <type> <protocol version, 4 bytes BE> <table1: 00=yes> <table2: 00=yes>
 	inline constexpr size_t INIT_REPLY_TABLE2_INDEX = 7;
 	// General settings: up to four device-defined boolean/list settings in slots D1..D4. Which slot holds
@@ -183,6 +195,14 @@ enum class EQ_PRESET : unsigned char
 	BASS_BOOST = 0x16,
 	SPEECH = 0x17,
 	MANUAL = 0xa0
+};
+
+// ULT bass mode (EqUltModeStatus), the same three states the headset's ULT button cycles through.
+enum class ULT_MODE : unsigned char
+{
+	OFF = 0x00,
+	ULT1 = 0x01,
+	ULT2 = 0x02
 };
 
 #define APP_NAME "SonyBridge " __HEADPHONES_APP_VERSION__

@@ -98,6 +98,9 @@ struct ContentView: View {
         if model.multipointLoading || model.hasPairedDevices || model.hasPlaybackPinState {
             devicesCard
         }
+        if model.supportsUltMode {
+            ultCard
+        }
         if model.supportsEqualizer {
             equalizerCard
         }
@@ -189,6 +192,36 @@ struct ContentView: View {
         .themedCard()
     }
 
+    // Sound Connect's "Bass Control" on the ULT WEAR: the ULT mode (same as the ULT button) plus Clear Bass.
+    private var ultCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 2) {
+                cardTitle("Bass Control")
+                Text("ULT mode, same as the ULT button")
+                    .font(.system(size: 11))
+                    .foregroundColor(palette.secondary)
+            }
+            UltModeControl(model: model)
+            if model.supportsClearBassControl {
+                HStack(spacing: 10) {
+                    Text("Clear Bass")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(palette.accentText)
+                        .frame(width: 64, alignment: .leading)
+                    Slider(value: Binding(
+                        get: { Double(model.clearBass) },
+                        set: { model.setClearBass(Int($0.rounded())) }
+                    ), in: -10...10, step: 1).accentColor(palette.accent)
+                    Text("\(model.clearBass > 0 ? "+" : "")\(model.clearBass)")
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .foregroundColor(palette.primary)
+                        .frame(width: 26, alignment: .trailing)
+                }
+            }
+        }
+        .themedCard()
+    }
+
     private let eqBandLabels = ["400", "1k", "2.5k", "6.3k", "16k"]
     private let tenBandEqLabels = ["31", "63", "125", "250", "500", "1k", "2k", "4k", "8k", "16k"]
 
@@ -210,7 +243,8 @@ struct ContentView: View {
                         set: { model.eqBands[i] = Int($0.rounded()); model.applyCustomEq() }
                     ), display: model.eqBands[i], raw: model.tenBandEqualizer)
                 }
-                if !model.tenBandEqualizer {
+                // On the ULT WEAR clear bass sits in the Bass Control card instead, as in Sony's app.
+                if !model.tenBandEqualizer && !model.supportsClearBassControl {
                     eqBandRow("Bass", value: Binding(
                         get: { Double(model.clearBass) },
                         set: { model.clearBass = Int($0.rounded()); model.applyCustomEq() }
@@ -554,6 +588,11 @@ enum EQPresets {
     static func list(tenBand: Bool) -> [(String, Int)] { tenBand ? Self.tenBand : fiveBand }
 }
 
+// ULT bass mode values (EqUltModeStatus), in the order the headset's ULT button cycles them.
+enum ULTModes {
+    static let list: [(String, Int)] = [("Off", 0), ("ULT 1", 1), ("ULT 2", 2)]
+}
+
 extension SHCAmbientMode {
     var displayName: String {
         switch self {
@@ -573,8 +612,17 @@ struct ProductImage: View {
     @Environment(\.appTheme) private var theme
     @Environment(\.colorScheme) private var colorScheme
 
+    // Image name for a Bluetooth device name: the lowercased name with dashes ("WH-CH720N" -> "wh-ch720n"),
+    // except for models whose Bluetooth name isn't the model number.
+    static func assetName(for deviceName: String) -> String {
+        let slug = deviceName.lowercased().replacingOccurrences(of: " ", with: "-")
+        // The ULT WEAR (WH-ULT900N) advertises itself as "Sony ULT WEAR".
+        if slug.contains("ult-wear") || slug.contains("ult900") { return "wh-ult900n" }
+        return slug
+    }
+
     var body: some View {
-        if let image = NSImage(named: deviceName.lowercased().replacingOccurrences(of: " ", with: "-")) {
+        if let image = NSImage(named: Self.assetName(for: deviceName)) {
             Image(nsImage: image)
                 .resizable()
                 .aspectRatio(contentMode: .fit)
@@ -691,6 +739,44 @@ struct AmbientModeControl: View {
         let selected = model.mode == mode
         return Button(action: { model.setMode(mode) }) {
             Text(mode.displayName)
+                .font(.system(size: 11.5, weight: .semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .padding(.horizontal, 8)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .selectable(selected)
+                .shadow(color: selected ? palette.selectedShadow : .clear, radius: 8)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// ULT bass mode Off / ULT 1 / ULT 2, styled like AmbientModeControl.
+struct UltModeControl: View {
+    @ObservedObject var model: HeadphonesModel
+
+    @Environment(\.appTheme) private var theme
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var palette: Palette { theme.palette(colorScheme) }
+
+    var body: some View {
+        let track = RoundedRectangle(cornerRadius: 11, style: .continuous)
+        HStack(spacing: theme.isSignature ? 6 : 0) {
+            ForEach(ULTModes.list, id: \.1) { option in
+                modeButton(option.0, option.1)
+            }
+        }
+        .padding(theme.isSignature ? 0 : 3)
+        .background(palette.track, in: track)
+        .overlay(track.strokeBorder(theme.isSignature ? .clear : palette.cardStroke, lineWidth: 1))
+    }
+
+    private func modeButton(_ name: String, _ value: Int) -> some View {
+        let selected = model.ultMode == value
+        return Button(action: { model.setUltMode(value) }) {
+            Text(name)
                 .font(.system(size: 11.5, weight: .semibold))
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
