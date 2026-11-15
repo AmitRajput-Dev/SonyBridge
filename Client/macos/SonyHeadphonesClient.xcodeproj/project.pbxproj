@@ -27,6 +27,9 @@
 		CC00000000000000000000A3 /* MenuBarController.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC00000000000000000000A4 /* MenuBarController.swift */; };
 		CC00000000000000000000A5 /* QuickControlsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC00000000000000000000A6 /* QuickControlsView.swift */; };
 		DD0000000000000000000001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000002 /* Assets.xcassets */; };
+		EE0000000000000000000021 /* Localization.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE0000000000000000000001 /* Localization.swift */; };
+		EE0000000000000000000022 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = EE0000000000000000000011 /* Localizable.strings */; };
+		EE0000000000000000000023 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = EE0000000000000000000012 /* InfoPlist.strings */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -40,7 +43,6 @@
 		A8DC78E62576922D00447738 /* SonyHeadphonesClient.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SonyHeadphonesClient.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A8DC78E72576923D00447738 /* MacOSBluetoothConnector.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = MacOSBluetoothConnector.h; sourceTree = "<group>"; };
 		A8DC78E82576923D00447738 /* MacOSBluetoothConnector.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = MacOSBluetoothConnector.mm; sourceTree = "<group>"; };
-		A8DC78E92576923D00447738 /* Main.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = Main.storyboard; sourceTree = "<group>"; };
 		A8DC78EA2576923D00447738 /* main.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = main.mm; sourceTree = "<group>"; };
 		A8DC78EE2576950500447738 /* IBluetoothConnector.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = IBluetoothConnector.h; path = ../IBluetoothConnector.h; sourceTree = "<group>"; };
 		A8DC78EF2576952E00447738 /* BluetoothWrapper.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = BluetoothWrapper.cpp; path = ../BluetoothWrapper.cpp; sourceTree = "<group>"; };
@@ -66,6 +68,11 @@
 		CC00000000000000000000A6 /* QuickControlsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickControlsView.swift; sourceTree = "<group>"; };
 		CC0000000000000000000008 /* SonyHeadphonesClient-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "SonyHeadphonesClient-Bridging-Header.h"; sourceTree = "<group>"; };
 		DD0000000000000000000002 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		EE0000000000000000000001 /* Localization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Localization.swift; sourceTree = "<group>"; };
+		EE0000000000000000000002 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/Localizable.strings"; sourceTree = "<group>"; };
+		EE0000000000000000000003 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/InfoPlist.strings"; sourceTree = "<group>"; };
+		EE0000000000000000000004 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/Main.storyboard; sourceTree = "<group>"; };
+		EE0000000000000000000005 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/Main.strings"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -91,6 +98,8 @@
 				A8DC78E82576923D00447738 /* MacOSBluetoothConnector.mm */,
 				A8DC78EA2576923D00447738 /* main.mm */,
 				A8DC78E92576923D00447738 /* Main.storyboard */,
+				EE0000000000000000000011 /* Localizable.strings */,
+				EE0000000000000000000012 /* InfoPlist.strings */,
 				A8DC78E32576922700447738 /* info.plist */,
 				A8DC78E62576922D00447738 /* SonyHeadphonesClient.app */,
 				A8DC78EE2576950500447738 /* IBluetoothConnector.h */,
@@ -116,6 +125,7 @@
 				CC00000000000000000000A2 /* Theme.swift */,
 				CC00000000000000000000A4 /* MenuBarController.swift */,
 				CC00000000000000000000A6 /* QuickControlsView.swift */,
+				EE0000000000000000000001 /* Localization.swift */,
 				CC0000000000000000000008 /* SonyHeadphonesClient-Bridging-Header.h */,
 				DD0000000000000000000002 /* Assets.xcassets */,
 				A8DC790325769A6600447738 /* Frameworks */,
@@ -172,6 +182,7 @@
 			knownRegions = (
 				en,
 				Base,
+				"zh-Hans",
 			);
 			mainGroup = A8DC78BB25757BF300447738;
 			productRefGroup = A8DC78BB25757BF300447738;
@@ -183,12 +194,42 @@
 		};
 /* End PBXProject section */
 
+/* Begin PBXVariantGroup section */
+		EE0000000000000000000011 /* Localizable.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				EE0000000000000000000002 /* zh-Hans */,
+			);
+			name = Localizable.strings;
+			sourceTree = "<group>";
+		};
+		EE0000000000000000000012 /* InfoPlist.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				EE0000000000000000000003 /* zh-Hans */,
+			);
+			name = InfoPlist.strings;
+			sourceTree = "<group>";
+		};
+		A8DC78E92576923D00447738 /* Main.storyboard */ = {
+			isa = PBXVariantGroup;
+			children = (
+				EE0000000000000000000004 /* Base */,
+				EE0000000000000000000005 /* zh-Hans */,
+			);
+			name = Main.storyboard;
+			sourceTree = "<group>";
+		};
+/* End PBXVariantGroup section */
+
 /* Begin PBXResourcesBuildPhase section */
 		A8DC78C225757BF300447738 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 				A8DC793225769EA500447738 /* Main.storyboard in Resources */,
+				EE0000000000000000000022 /* Localizable.strings in Resources */,
+				EE0000000000000000000023 /* InfoPlist.strings in Resources */,
 				DD0000000000000000000001 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -215,6 +256,7 @@
 				CC00000000000000000000A1 /* Theme.swift in Sources */,
 				CC00000000000000000000A3 /* MenuBarController.swift in Sources */,
 				CC00000000000000000000A5 /* QuickControlsView.swift in Sources */,
+				EE0000000000000000000021 /* Localization.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

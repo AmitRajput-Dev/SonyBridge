@@ -96,7 +96,7 @@ import SwiftUI
         statusItem.button?.appearsDisabled = !model.connected
         if let device = device {
             let name = device.name.isEmpty ? device.address : device.name
-            statusItem.button?.toolTip = "Playing on \(name)" + (model.playbackPinned ? " (fixed)" : "")
+            statusItem.button?.toolTip = String(format: L("Playing on %@"), name) + (model.playbackPinned ? L(" (fixed)") : "")
         } else {
             statusItem.button?.toolTip = model.connected ? model.deviceName : "SonyBridge"
         }
@@ -177,13 +177,13 @@ import SwiftUI
     }
 
     private func actionItem(_ title: String, _ action: Selector, key: String = "") -> NSMenuItem {
-        let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
+        let item = NSMenuItem(title: L(title), action: action, keyEquivalent: key)
         item.target = self
         return item
     }
 
     private func disabledItem(_ title: String) -> NSMenuItem {
-        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        let item = NSMenuItem(title: L(title), action: nil, keyEquivalent: "")
         item.isEnabled = false
         return item
     }

@@ -1,0 +1,114 @@
+/* 
+  Localizable.strings — Simplified Chinese (zh-Hans)
+  SonyBridge / SonyHeadphonesClient macOS
+
+  SwiftUI picks this up for Text("…")/Button("…") literals; strings built at
+  runtime go through L() in Localization.swift. Keep the keys identical to the
+  English source strings.
+*/
+
+/* ContentView — cards */
+"Ambient Sound Control" = "环境声控制";
+"Ambient Sound Level" = "环境声级别";
+"Equalizer" = "均衡器";
+"Upscale compressed audio" = "提升压缩音频音质";
+"Settings" = "设置";
+"Adaptive Volume" = "自适应音量";
+"Auto-adjust volume by surroundings" = "根据周围环境自动调节音量";
+"Speak-to-Chat" = "智能免摘对话";
+"Pause music when you talk" = "说话时自动暂停音乐";
+"Keep off on connect" = "连接时保持关闭";
+"Connect to 2 devices" = "连接两台设备";
+"Stay paired to two devices at once" = "同时与两台设备保持配对";
+"Auto Power-Off" = "自动关机";
+"Turn off when idle" = "闲置时自动关闭";
+"Focus on Voice" = "聚焦人声";
+
+/* ContentView — devices card */
+"Devices" = "设备";
+"Reading devices from the headset…" = "正在从耳机读取设备…";
+"Playback device" = "播放设备";
+"Fixed" = "已固定";
+"Switches automatically" = "自动切换";
+"Unfix" = "取消固定";
+"Fix" = "固定";
+"Connected" = "已连接";
+"Paired" = "已配对";
+"This headset didn't return a device list." = "这副耳机没有返回设备列表。";
+"Sending…" = "正在发送…";
+"Switching and fixing are experimental" = "切换和固定功能仍属实验性";
+"Copy diagnostics" = "复制诊断信息";
+"This Mac" = "此 Mac";
+"Switch playback device and fix" = "切换播放设备并固定";
+"Switch playback device" = "切换播放设备";
+
+/* ContentView — about popover */
+"Status" = "状态";
+"Disconnected" = "未连接";
+"Battery L" = "左耳电量";
+"Battery R" = "右耳电量";
+"Case" = "充电盒";
+"Battery" = "电量";
+"(charging)" = "（充电中）";
+"Codec" = "编解码器";
+"Firmware" = "固件";
+"Protocol" = "协议";
+"Bluetooth" = "蓝牙";
+"Appearance" = "外观";
+"SonyBridge · not affiliated with Sony" = "SonyBridge · 与 Sony 无关";
+
+/* Theme names */
+"Refined Dark" = "精致暗色";
+"Native Glass" = "原生玻璃";
+"Sony Signature" = "索尼经典";
+
+/* Ambient modes */
+"Noise Canceling" = "降噪";
+"Ambient" = "环境声";
+"Off" = "关闭";
+
+/* Equalizer presets */
+"Bright" = "明亮";
+"Excited" = "激昂";
+"Mellow" = "醇厚";
+"Relaxed" = "放松";
+"Vocal" = "人声";
+"Treble" = "高音";
+"Bass" = "低音";
+"Speech" = "语音";
+"Manual" = "手动";
+"Custom" = "自定义";
+
+/* Auto Power-Off options */
+"5 min" = "5 分钟";
+"30 min" = "30 分钟";
+"1 hour" = "1 小时";
+"3 hours" = "3 小时";
+"When taken off" = "取下时";
+
+/* Connect */
+"No headphones connected" = "未连接耳机";
+"Connecting…" = "正在连接…";
+"Connect headphones" = "连接耳机";
+
+/* QuickControlsView */
+"Level" = "级别";
+"Playback fixed to" = "播放固定到";
+"Playing on" = "正在播放于";
+"No playback device" = "无播放设备";
+"Pin to this Mac" = "固定到此 Mac";
+"Open SonyBridge" = "打开 SonyBridge";
+"Quit" = "退出";
+
+/* MenuBarController */
+"Playing on %@" = "正在 %@ 上播放";
+" (fixed)" = "（已固定）";
+"Playback Fixed to This Mac" = "播放已固定到此 Mac";
+"Pin Playback to This Mac" = "将播放固定到此 Mac";
+"This Mac isn't a connected device" = "此 Mac 不是已连接的设备";
+"Unfix Playback" = "取消固定播放";
+"Connect Headphones" = "连接耳机";
+"Quit SonyBridge" = "退出 SonyBridge";
+
+/* HeadphonesModel */
+"Headphones disconnected." = "耳机已断开连接。";
