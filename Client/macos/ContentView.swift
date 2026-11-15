@@ -155,7 +155,7 @@ struct ContentView: View {
     }
 
     private func cardTitle(_ title: String) -> some View {
-        Text(theme.isSignature ? title.uppercased() : title)
+        Text(theme.isSignature ? L(title).uppercased() : L(title))
             .font(.system(size: theme.isSignature ? 11 : 15, weight: .semibold))
             .tracking(theme.isSignature ? 1.2 : 0)
             .foregroundColor(theme.isSignature ? palette.secondary : palette.primary)
@@ -224,7 +224,7 @@ struct ContentView: View {
     // raw: the ten-band layout's 0...12 device steps (no dB mapping is known yet), shown unsigned.
     private func eqBandRow(_ label: String, value: Binding<Double>, display: Int, accent: Bool = false, raw: Bool = false) -> some View {
         HStack(spacing: 10) {
-            Text(label)
+            Text(L(label))
                 .font(.system(size: 11, weight: .medium))
                 .foregroundColor(accent ? palette.accentText : palette.secondary)
                 .frame(width: 34, alignment: .leading)
@@ -249,7 +249,7 @@ struct ContentView: View {
     private func eqChip(_ name: String, _ code: Int) -> some View {
         let selected = model.eqPreset == code
         return Button(action: { model.setEqualizer(code) }) {
-            Text(name)
+            Text(L(name))
                 .font(.system(size: 12, weight: .medium))
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 8)
@@ -293,7 +293,7 @@ struct ContentView: View {
                         get: { model.autoPowerOff },
                         set: { model.setAutoPowerOff($0) }
                     )) {
-                        ForEach(0..<apoOptions.count, id: \.self) { i in Text(apoOptions[i]).tag(i) }
+                        ForEach(0..<apoOptions.count, id: \.self) { i in Text(L(apoOptions[i])).tag(i) }
                     }
                     .pickerStyle(MenuPickerStyle())
                     .frame(width: 130)
@@ -307,8 +307,8 @@ struct ContentView: View {
     private func settingToggle(_ title: String, _ subtitle: String, on: Bool, action: @escaping (Bool) -> Void) -> some View {
         SwitchRow(title, isOn: Binding(get: { on }, set: { action($0) })) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.system(size: 14, weight: .semibold)).foregroundColor(palette.primary)
-                Text(subtitle).font(.system(size: 11)).foregroundColor(palette.secondary)
+                Text(L(title)).font(.system(size: 14, weight: .semibold)).foregroundColor(palette.primary)
+                Text(L(subtitle)).font(.system(size: 11)).foregroundColor(palette.secondary)
             }
         }
     }
@@ -348,7 +348,7 @@ struct ContentView: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Playback device").font(.system(size: 13, weight: .medium)).foregroundColor(palette.primary)
-                        Text(model.playbackPinned ? "Fixed" : "Switches automatically")
+                        Text(L(model.playbackPinned ? "Fixed" : "Switches automatically"))
                             .font(.system(size: 11)).foregroundColor(palette.secondary)
                     }
                     Spacer()
@@ -385,7 +385,7 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 14) {
             Divider().background(palette.cardStroke)
             HStack {
-                Text(model.multipointBusy ? "Sending…" : "Switching and fixing are experimental")
+                Text(L(model.multipointBusy ? "Sending…" : "Switching and fixing are experimental"))
                     .font(.system(size: 11))
                     .foregroundColor(palette.secondary.opacity(0.7))
                 Spacer()
@@ -400,7 +400,7 @@ struct ContentView: View {
     }
 
     private func sectionLabel(_ text: String) -> some View {
-        Text(text.uppercased())
+        Text(L(text).uppercased())
             .font(.system(size: 10, weight: .semibold))
             .tracking(0.8)
             .foregroundColor(palette.secondary.opacity(0.8))
@@ -472,7 +472,7 @@ struct ContentView: View {
                 .font(.system(size: 15, weight: .bold))
                 .foregroundColor(palette.primary)
                 .padding(.bottom, 10)
-            aboutRow("Status", model.connected ? "Connected" : "Disconnected")
+            aboutRow("Status", model.connected ? L("Connected") : L("Disconnected"))
             if model.hasDualBattery {
                 aboutRow("Battery L", batteryText(model.batteryLeft, model.batteryLeftCharging))
                 aboutRow("Battery R", batteryText(model.batteryRight, model.batteryRightCharging))
@@ -480,7 +480,7 @@ struct ContentView: View {
                     aboutRow("Case", batteryText(model.batteryCase, model.batteryCaseCharging))
                 }
             } else if model.batteryLevel >= 0 {
-                aboutRow("Battery", "\(model.batteryLevel)%\(model.batteryCharging ? " (charging)" : "")")
+                aboutRow("Battery", "\(model.batteryLevel)%\(model.batteryCharging ? " " + L("(charging)") : "")")
             }
             if !model.codec.isEmpty { aboutRow("Codec", model.codec) }
             if !model.firmware.isEmpty { aboutRow("Firmware", model.firmware) }
@@ -525,12 +525,12 @@ struct ContentView: View {
 
     private func batteryText(_ level: Int, _ charging: Bool) -> String {
         guard level >= 0 else { return "—" }
-        return "\(level)%\(charging ? " (charging)" : "")"
+        return "\(level)%\(charging ? " " + L("(charging)") : "")"
     }
 
     private func aboutRow(_ label: String, _ value: String) -> some View {
         HStack {
-            Text(label).font(.system(size: 12)).foregroundColor(palette.secondary)
+            Text(L(label)).font(.system(size: 12)).foregroundColor(palette.secondary)
             Spacer()
             Text(value).font(.system(size: 12, weight: .medium)).foregroundColor(palette.primary)
         }
@@ -557,9 +557,9 @@ enum EQPresets {
 extension SHCAmbientMode {
     var displayName: String {
         switch self {
-        case .noiseCanceling: return "Noise Canceling"
-        case .ambientSound: return "Ambient"
-        default: return "Off"
+        case .noiseCanceling: return L("Noise Canceling")
+        case .ambientSound: return L("Ambient")
+        default: return L("Off")
         }
     }
 }
@@ -609,7 +609,7 @@ struct StatusChips: View {
                     budBattery("R", model.batteryRight, charging: model.batteryRightCharging)
                     if model.batteryCase >= 0 {
                         Text("·")
-                        budBattery("Case", model.batteryCase, charging: model.batteryCaseCharging)
+                        budBattery(L("Case"), model.batteryCase, charging: model.batteryCaseCharging)
                     }
                 } else if model.batteryLevel >= 0 {
                     Image(systemName: model.batteryCharging ? "bolt.fill" : batterySymbol(model.batteryLevel))
@@ -641,7 +641,7 @@ struct StatusChips: View {
     }
 
     private func chipText(_ text: String) -> Text {
-        Text(theme.isSignature ? text.uppercased() : text).tracking(theme.isSignature ? 0.8 : 0)
+        Text(theme.isSignature ? L(text).uppercased() : L(text)).tracking(theme.isSignature ? 0.8 : 0)
     }
 
     // One "L 82%" reading in the battery chip, with a bolt in place of the battery glyph while that unit
@@ -752,7 +752,7 @@ struct ConnectButton: View {
         // Activate first: from the menu-bar panel the app isn't frontmost, and the device picker the
         // connect shows would open behind other apps.
         Button(action: { NSApp.activate(ignoringOtherApps: true); model.connect() }) {
-            Text(model.connecting ? "Connecting…" : "Connect headphones")
+            Text(model.connecting ? L("Connecting…") : L("Connect headphones"))
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundColor(palette.onAccent)
                 .frame(maxWidth: .infinity)

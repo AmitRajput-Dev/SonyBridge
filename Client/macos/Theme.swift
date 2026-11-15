@@ -13,9 +13,9 @@ enum AppTheme: String, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
-        case .refinedDark: return "Refined Dark"
-        case .nativeGlass: return "Native Glass"
-        case .sonySignature: return "Sony Signature"
+        case .refinedDark: return L("Refined Dark")
+        case .nativeGlass: return L("Native Glass")
+        case .sonySignature: return L("Sony Signature")
         }
     }
 
@@ -235,7 +235,7 @@ struct SwitchRow<Label: View>: View {
         HStack {
             label
             Spacer()
-            Toggle(title, isOn: isOn)
+            Toggle(LocalizedStringKey(title), isOn: isOn)
                 .labelsHidden()
                 .toggleStyle(SwitchToggleStyle(tint: theme.palette(colorScheme).accent))
         }
@@ -258,7 +258,7 @@ struct CapsuleButton: View {
     var body: some View {
         let palette = theme.palette(colorScheme)
         Button(action: action) {
-            Text(title)
+            Text(L(title))
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundColor(palette.primary)
                 .padding(.horizontal, 12)

@@ -108,7 +108,7 @@ struct QuickControlsView: View {
                 set: { model.setEqualizer($0) }
             )) {
                 ForEach(EQPresets.list(tenBand: model.tenBandEqualizer), id: \.1) { preset in
-                    Text(preset.0).tag(preset.1)
+                    Text(L(preset.0)).tag(preset.1)
                 }
             }
             .pickerStyle(MenuPickerStyle())
@@ -127,10 +127,10 @@ struct QuickControlsView: View {
                     .foregroundColor(palette.accent)
                     .frame(width: 18)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(model.playbackPinned ? "Playback fixed to" : "Playing on")
+                    Text(L(model.playbackPinned ? "Playback fixed to" : "Playing on"))
                         .font(.system(size: 11))
                         .foregroundColor(palette.secondary)
-                    Text(model.playbackDevice.map { $0.name.isEmpty ? $0.address : $0.name } ?? "No playback device")
+                    Text(L(model.playbackDevice.map { $0.name.isEmpty ? $0.address : $0.name } ?? "No playback device"))
                         .font(.system(size: 13, weight: .medium))
                         .foregroundColor(palette.primary)
                         .lineLimit(1)

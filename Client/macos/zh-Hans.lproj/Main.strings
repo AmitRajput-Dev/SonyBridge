@@ -1,0 +1,24 @@
+/* 
+  Main.strings — Simplified Chinese (zh-Hans)
+  Main menu only. ViewController.mm removes the legacy storyboard controls and hides the window
+  title, so the menu bar is the only part of this storyboard the user sees.
+*/
+"5kV-Vb-QxS.title" = "关于 SonyHeadphonesClient";
+"BOF-NM-1cW.title" = "偏好设置…";
+"NMo-om-nkz.title" = "服务";
+"hz9-B4-Xy5.title" = "服务";
+"Olw-nP-bQN.title" = "隐藏 SonyHeadphonesClient";
+"Vdr-fp-XzO.title" = "隐藏其他";
+"Kd2-mp-pUS.title" = "全部显示";
+"4sb-4s-VLi.title" = "退出 SonyHeadphonesClient";
+"H8h-7b-M4v.title" = "显示";
+"HyV-fh-RgO.title" = "显示";
+"snW-S8-Cw5.title" = "显示工具栏";
+"1UK-8n-QPP.title" = "自定工具栏…";
+"kIP-vf-haE.title" = "显示边栏";
+"4J7-dP-txa.title" = "进入全屏幕";
+"aUF-d1-5bR.title" = "窗口";
+"Td7-aD-5lo.title" = "窗口";
+"OY7-WF-poV.title" = "最小化";
+"R4o-n2-Eq4.title" = "缩放";
+"LE2-aR-0XJ.title" = "前置全部窗口";

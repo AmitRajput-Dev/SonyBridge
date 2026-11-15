@@ -358,7 +358,7 @@ final class HeadphonesModel: ObservableObject {
             if self.connected && !self.bridge.connected {
                 self.connected = false
                 self.deviceName = ""
-                self.errorMessage = "Headphones disconnected."
+                self.errorMessage = L("Headphones disconnected.")
                 self.stopWatchingConnection()
                 self.stopDynamicPolling()
                 // Release the dead session too, so a reconnect starts clean and the device list doesn't
