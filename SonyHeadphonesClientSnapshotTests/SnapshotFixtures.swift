@@ -98,7 +98,11 @@ import SwiftUI
     }
 
     static func connectingStore() -> StoreOf<DisconnectedReducer> {
-        Store(initialState: DisconnectedReducer.State(connecting: true)) {
+        Store(
+            initialState: DisconnectedReducer.State(
+                uiState: HeadphonesUIState(connecting: true)
+            )
+        ) {
             DisconnectedReducer()
         }
     }
@@ -117,7 +121,11 @@ import SwiftUI
     }
 
     static func errorStore() -> StoreOf<DisconnectedReducer> {
-        Store(initialState: DisconnectedReducer.State(errorMessage: "Could not connect.")) {
+        Store(
+            initialState: DisconnectedReducer.State(
+                uiState: HeadphonesUIState(errorMessage: "Could not connect.")
+            )
+        ) {
             DisconnectedReducer()
         }
     }

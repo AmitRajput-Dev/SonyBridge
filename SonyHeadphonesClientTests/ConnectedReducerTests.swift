@@ -32,7 +32,7 @@ import Testing
         }
 
         await store.send(.snapshotReceived(snapshot)) {
-            $0.$uiState.withLock { $0.apply(snapshot) }
+            $0.$uiState.withLock { $0 = $0.applying(snapshot) }
         }
 
         #expect(store.state.uiState.mode == .ambientSound)
@@ -101,7 +101,7 @@ import Testing
         )
         await store.receive(\.snapshotReceived) {
             $0.$uiState.withLock {
-                $0.apply(confirmed)
+                $0 = $0.applying(confirmed)
                 $0.focusOnVoiceLoading = false
             }
         }
@@ -147,7 +147,7 @@ import Testing
         )
         await store.receive(\.snapshotReceived) {
             $0.$uiState.withLock {
-                $0.apply(confirmed)
+                $0 = $0.applying(confirmed)
                 $0.adaptiveVolumeLoading = false
             }
         }
@@ -193,7 +193,7 @@ import Testing
         )
         await store.receive(\.snapshotReceived) {
             $0.$uiState.withLock {
-                $0.apply(confirmed)
+                $0 = $0.applying(confirmed)
                 $0.autoPowerOffLoading = false
             }
         }
@@ -240,7 +240,7 @@ import Testing
         )
         await store.receive(\.snapshotReceived) {
             $0.$uiState.withLock {
-                $0.apply(confirmed)
+                $0 = $0.applying(confirmed)
                 $0.dseeLoading = false
             }
         }
@@ -283,7 +283,7 @@ import Testing
         )
         await store.receive(\.snapshotReceived) {
             $0.$uiState.withLock {
-                $0.apply(confirmed)
+                $0 = $0.applying(confirmed)
                 $0.speakToChatLoading = false
             }
         }
@@ -351,7 +351,7 @@ import Testing
 
         await store.send(.watchTick)
         await store.receive(\.watchTickResponse) {
-            $0.$uiState.withLock { $0.apply(SonyHeadphones()) }
+            $0.$uiState.withLock { $0 = $0.applying(SonyHeadphones()) }
         }
         await store.receive(\.delegate)
 

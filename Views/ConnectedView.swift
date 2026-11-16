@@ -135,7 +135,7 @@ import SwiftUI
 
                 case let .snapshotReceived(snap):
                     state.$uiState.withLock {
-                        $0.apply(snap)
+                        $0 = $0.applying(snap)
                         $0.errorMessage = nil
                         $0.focusOnVoiceLoading = false
                         $0.adaptiveVolumeLoading = false
@@ -294,7 +294,7 @@ import SwiftUI
 
                 case let .dynamicTickResponse(snap):
                     state.$uiState.withLock {
-                        $0.apply(snap)
+                        $0 = $0.applying(snap)
                         $0.errorMessage = nil
                     }
                     return .none
@@ -306,7 +306,7 @@ import SwiftUI
 
                 case let .watchTickResponse(snap):
                     state.$uiState.withLock {
-                        $0.apply(snap)
+                        $0 = $0.applying(snap)
                         $0.errorMessage = nil
                     }
                     if snap.connected {

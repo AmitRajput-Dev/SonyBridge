@@ -10,20 +10,6 @@ import SwiftUI
     @ObservableState struct State: Equatable {
         var uiState: HeadphonesUIState = .init()
         var devices: [DiscoveredDevice] = []
-
-        init(uiState: HeadphonesUIState = .init(), devices: [DiscoveredDevice] = []) {
-            self.uiState = uiState
-            self.devices = devices
-        }
-
-        init(
-            connecting: Bool = false,
-            errorMessage: String? = nil,
-            devices: [DiscoveredDevice] = []
-        ) {
-            self.uiState = .init(connecting: connecting, errorMessage: errorMessage)
-            self.devices = devices
-        }
     }
 
     enum Action {
@@ -198,17 +184,19 @@ struct DisconnectedView: View {
 
 #Preview {
     DisconnectedView(
-        store: Store(initialState: DisconnectedReducer.State(connecting: true)) {
-            DisconnectedReducer()
-        }
+        store: Store(
+            initialState: .init(uiState: .init(connecting: true)),
+            reducer: DisconnectedReducer.init
+        )
     )
 }
 
 #Preview {
     DisconnectedView(
-        store: Store(initialState: DisconnectedReducer.State(errorMessage: "Error")) {
-            DisconnectedReducer()
-        }
+        store: Store(
+            initialState: .init(uiState: .init(errorMessage: "Error")),
+            reducer: DisconnectedReducer.init
+        )
     )
 }
 

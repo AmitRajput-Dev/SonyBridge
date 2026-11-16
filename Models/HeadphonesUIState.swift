@@ -228,46 +228,59 @@ extension HeadphonesUIState {
     ///
     /// - Parameter headphones: The snapshot the client returned.
     public init(_ headphones: SonyHeadphones) {
-        self.init()
-        apply(headphones)
+        self.init(
+            connected: headphones.connected,
+            deviceModel: headphones.deviceModel,
+            maxAmbientLevel: headphones.maxAmbientLevel,
+            mode: headphones.mode,
+            ambientLevel: headphones.ambientLevel,
+            focusOnVoice: headphones.focusOnVoice,
+            focusOnVoiceAvailable: headphones.focusOnVoiceAvailable,
+            batteryLevel: headphones.batteryLevel,
+            batteryCharging: headphones.batteryCharging,
+            hasDualBattery: headphones.hasDualBattery,
+            batteryLeft: headphones.batteryLeft,
+            batteryRight: headphones.batteryRight,
+            batteryCase: headphones.batteryCase,
+            eqPreset: headphones.eqPreset,
+            supportsEqualizer: headphones.supportsEqualizer,
+            eqBands: headphones.eqBands,
+            clearBass: headphones.clearBass,
+            dsee: headphones.dsee,
+            hasAutoPowerOff: headphones.hasAutoPowerOff,
+            autoPowerOff: headphones.autoPowerOff,
+            firmware: headphones.firmware,
+            codec: headphones.codec,
+            hasSpeakToChat: headphones.hasSpeakToChat,
+            speakToChat: headphones.speakToChat,
+            hasAdaptiveVolume: headphones.hasAdaptiveVolume,
+            adaptiveVolume: headphones.adaptiveVolume,
+            deviceMac: headphones.deviceMac,
+            protocolVersion: headphones.protocolVersion
+        )
     }
 
-    /// Folds a library snapshot into the domain state.
+    /// Returns the domain state that results from folding a library snapshot into this one.
     ///
-    /// Every device-derived field is overwritten with the snapshot's value, while the transient
-    /// flags (`connecting`, the `*Loading` in-flight markers and `errorMessage`) are preserved:
-    /// they describe the app's own progress, not the headset.
+    /// Every device-derived field comes from the snapshot, while the transient flags (`connecting`,
+    /// the `*Loading` in-flight markers and `errorMessage`) are carried over: they describe the
+    /// app's own progress, not the headset, and a snapshot carries no information about them.
+    ///
+    /// The receiver is left untouched.
     ///
     /// - Parameter headphones: The snapshot the client returned.
-    public mutating func apply(_ headphones: SonyHeadphones) {
-        connected = headphones.connected
-        deviceModel = headphones.deviceModel
-        maxAmbientLevel = headphones.maxAmbientLevel
-        mode = headphones.mode
-        ambientLevel = headphones.ambientLevel
-        focusOnVoice = headphones.focusOnVoice
-        focusOnVoiceAvailable = headphones.focusOnVoiceAvailable
-        batteryLevel = headphones.batteryLevel
-        batteryCharging = headphones.batteryCharging
-        hasDualBattery = headphones.hasDualBattery
-        batteryLeft = headphones.batteryLeft
-        batteryRight = headphones.batteryRight
-        batteryCase = headphones.batteryCase
-        eqPreset = headphones.eqPreset
-        supportsEqualizer = headphones.supportsEqualizer
-        eqBands = headphones.eqBands
-        clearBass = headphones.clearBass
-        dsee = headphones.dsee
-        hasAutoPowerOff = headphones.hasAutoPowerOff
-        autoPowerOff = headphones.autoPowerOff
-        firmware = headphones.firmware
-        codec = headphones.codec
-        hasSpeakToChat = headphones.hasSpeakToChat
-        speakToChat = headphones.speakToChat
-        hasAdaptiveVolume = headphones.hasAdaptiveVolume
-        adaptiveVolume = headphones.adaptiveVolume
-        deviceMac = headphones.deviceMac
-        protocolVersion = headphones.protocolVersion
+    /// - Returns: A new domain state holding the snapshot's device state.
+    public func applying(_ headphones: SonyHeadphones) -> HeadphonesUIState {
+        var updated = HeadphonesUIState(headphones)
+        updated.connecting = connecting
+        updated.focusOnVoiceLoading = focusOnVoiceLoading
+        updated.adaptiveVolumeLoading = adaptiveVolumeLoading
+        updated.autoPowerOffLoading = autoPowerOffLoading
+        updated.dseeLoading = dseeLoading
+        updated.speakToChatLoading = speakToChatLoading
+        updated.eqPresetLoading = eqPresetLoading
+        updated.errorMessage = errorMessage
+        return updated
     }
 
     /// The battery level/charging combination reduced to the icon the UI shows.

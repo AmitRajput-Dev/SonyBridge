@@ -104,7 +104,9 @@ import Testing
         let client = HeadphonesTestClient()
         await client.setAutoConnectSucceeds(false)
         let store = TestStore(
-            initialState: DisconnectedReducer.State(errorMessage: "Boom")
+            initialState: DisconnectedReducer.State(
+                uiState: HeadphonesUIState(errorMessage: "Boom")
+            )
         ) {
             DisconnectedReducer()
         } withDependencies: {
