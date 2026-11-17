@@ -4,7 +4,6 @@
 //
 
 #import "HeadphonesBridge.h"
-#import <IOBluetoothUI/IOBluetoothUI.h>
 #import <IOBluetooth/IOBluetooth.h>
 
 #include <atomic>
@@ -29,6 +28,16 @@ static const unsigned kBatteryPollEveryNTicks = 15;
 @end
 
 @implementation SHCPairedDevice
+@end
+
+@interface SHCBluetoothDevice ()
+@property (nonatomic, copy, readwrite) NSString *name;
+@property (nonatomic, copy, readwrite) NSString *address;
+@property (nonatomic, readwrite) BOOL connected;
+@property (nonatomic, readwrite) BOOL looksLikeSony;
+@end
+
+@implementation SHCBluetoothDevice
 @end
 
 // IOBluetooth formats addresses as "aa-bb-cc-dd-ee-ff"; the headset reports "AA:BB:CC:DD:EE:FF".
@@ -190,7 +199,7 @@ static NSString *SHCNormalizedAddress(NSString *address) {
     return result;
 }
 
-static BOOL SHCLooksLikeSonyHeadset(NSString *name) {
+static BOOL SHCNameLooksLikeSony(NSString *name) {
     if (name.length == 0) return NO;
     NSArray<NSString *> *prefixes = @[@"WH-", @"WF-", @"WI-", @"MDR-", @"XB", @"LinkBuds", @"ULT"];
     for (NSString *p in prefixes) {
@@ -199,53 +208,87 @@ static BOOL SHCLooksLikeSonyHeadset(NSString *name) {
     return NO;
 }
 
-- (void)scanAndConnectWithCompletion:(void (^)(BOOL, NSString * _Nullable))completion {
-    // Prefer the already system-connected Sony headset (Sony-app "My Device" behaviour) and skip the
-    // native picker, which shows a confusing empty list when nothing is connected.
-    IOBluetoothDevice *device = nil;
-    for (IOBluetoothDevice *paired in [IOBluetoothDevice pairedDevices]) {
-        if ([paired isConnected] && SHCLooksLikeSonyHeadset([paired name])) {
-            device = paired;
-            break;
-        }
+// True if the device's cached SDP records include either Sony control service (v1 or v2 UUID).
+static BOOL SHCHasSonyService(IOBluetoothDevice *device) {
+    static const uint8_t kSonyV1[16] = {0x96,0xCC,0x20,0x3E,0x50,0x68,0x46,0xAD,0xB3,0x2D,0xE3,0x16,0xF5,0xE0,0x69,0xBA};
+    static const uint8_t kSonyV2[16] = {0x95,0x6C,0x7B,0x26,0xD4,0x9A,0x4B,0xA8,0xB0,0x3F,0xB1,0x7D,0x39,0x3C,0xB6,0xE2};
+    for (const uint8_t *bytes : {kSonyV1, kSonyV2}) {
+        IOBluetoothSDPUUID *uuid = [IOBluetoothSDPUUID uuidWithBytes:bytes length:16];
+        if ([device getServiceRecordForUUID:uuid]) return YES;
     }
-    // BLE/audio-only headsets (e.g. ULT WEAR) report isConnected == NO; fall back to any paired Sony headset.
-    if (!device) {
+    return NO;
+}
+
+// The macOS name can be a user rename ("Alemanyo 🎧"), so also check for Sony's control service.
+static BOOL SHCLooksLikeSonyHeadset(IOBluetoothDevice *device) {
+    return SHCNameLooksLikeSony([device name]) || SHCHasSonyService(device);
+}
+
++ (NSArray<SHCBluetoothDevice *> *)availableDevices {
+    NSMutableArray<SHCBluetoothDevice *> *result = [NSMutableArray array];
+    for (IOBluetoothDevice *device in [IOBluetoothDevice pairedDevices]) {
+        NSString *address = [device addressString];
+        if (!address) continue;
+        SHCBluetoothDevice *item = [SHCBluetoothDevice new];
+        item.name = [device nameOrAddress] ?: address;
+        item.address = SHCNormalizedAddress(address);
+        item.connected = [device isConnected];
+        item.looksLikeSony = SHCLooksLikeSonyHeadset(device);
+        [result addObject:item];
+    }
+    [result sortUsingComparator:^NSComparisonResult(SHCBluetoothDevice *a, SHCBluetoothDevice *b) {
+        if (a.looksLikeSony != b.looksLikeSony) return a.looksLikeSony ? NSOrderedAscending : NSOrderedDescending;
+        if (a.connected != b.connected) return a.connected ? NSOrderedAscending : NSOrderedDescending;
+        return [a.name localizedCaseInsensitiveCompare:b.name];
+    }];
+    return result;
+}
+
+- (void)connectToAddress:(NSString *)requestedAddress
+              completion:(void (^)(BOOL, BOOL, NSString * _Nullable))completion {
+    IOBluetoothDevice *device = nil;
+    if (requestedAddress.length > 0) {
+        device = [IOBluetoothDevice deviceWithAddressString:requestedAddress];
+        if (!device) {
+            completion(NO, NO, @"That Bluetooth device is no longer available.");
+            return;
+        }
+    } else {
+        // Prefer the already system-connected Sony headset (Sony-app "My Device" behaviour).
         for (IOBluetoothDevice *paired in [IOBluetoothDevice pairedDevices]) {
-            if (SHCLooksLikeSonyHeadset([paired name])) {
+            if ([paired isConnected] && SHCLooksLikeSonyHeadset(paired)) {
                 device = paired;
                 break;
             }
         }
-    }
-
-    if (!device) {
-        // Fall back to the native picker if we can't auto-identify a connected Sony device.
-        IOBluetoothDeviceSelectorController *selector = [IOBluetoothDeviceSelectorController deviceSelector];
-        if ([selector runModal] != kIOBluetoothUISuccess) {
-            completion(NO, nil); // user cancelled - not an error
+        // BLE/audio-only headsets (e.g. ULT WEAR) report isConnected == NO; fall back to any paired Sony headset.
+        if (!device) {
+            for (IOBluetoothDevice *paired in [IOBluetoothDevice pairedDevices]) {
+                if (SHCLooksLikeSonyHeadset(paired)) {
+                    device = paired;
+                    break;
+                }
+            }
+        }
+        if (!device) {
+            // Nothing identified as Sony: let the user choose from every paired device.
+            completion(NO, YES, nil);
             return;
         }
-        device = [[selector getResults] lastObject];
-    }
-
-    if (!device) {
-        completion(NO, @"No connected Sony headset found. Connect your headphones in macOS Bluetooth settings first.");
-        return;
     }
 
     // A device without an address string would hand std::string a null char* below (undefined
     // behaviour); getConnectedDevices() applies the same guard.
     NSString *address = [device addressString];
     if (!address) {
-        completion(NO, @"The selected device has no Bluetooth address.");
+        completion(NO, NO, @"The selected device has no Bluetooth address.");
         return;
     }
 
     try {
         _bt->connect([address UTF8String]);
     } catch (RecoverableException &exc) {
-        completion(NO, @(exc.what()));
+        completion(NO, NO, @(exc.what()));
         return;
     }
 
@@ -259,7 +302,7 @@ static BOOL SHCLooksLikeSonyHeadset(NSString *name) {
 
     if (!_bt->isConnected()) {
         _bt->disconnect();
-        completion(NO, @"Connection timed out.");
+        completion(NO, NO, @"Connection timed out.");
         return;
     }
 
@@ -271,7 +314,7 @@ static BOOL SHCLooksLikeSonyHeadset(NSString *name) {
     // A link the headset dropped on its own never went through -disconnect, so reset here: every new
     // Headphones needs the init handshake (its reply also gates the multipoint reads).
     _initialized = false;
-    completion(YES, nil);
+    completion(YES, NO, nil);
 }
 
 - (void)disconnect {

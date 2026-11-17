@@ -24,7 +24,18 @@ typedef NS_ENUM(NSInteger, SHCAmbientMode) {
 @property (nonatomic, readonly) BOOL isThisMac;
 @end
 
+// A device paired with this Mac, offered in the in-app device chooser.
+@interface SHCBluetoothDevice : NSObject
+@property (nonatomic, copy, readonly) NSString *name;         // macOS name (may be a user rename)
+@property (nonatomic, copy, readonly) NSString *address;      // "XX:XX:XX:XX:XX:XX"
+@property (nonatomic, readonly) BOOL connected;               // connected to this Mac (audio/ACL)
+@property (nonatomic, readonly) BOOL looksLikeSony;           // Sony name or Sony control service in SDP
+@end
+
 @interface HeadphonesBridge : NSObject
+
+// Every device paired with this Mac, likely Sony headsets first, then connected ones. Main thread.
++ (NSArray<SHCBluetoothDevice *> *)availableDevices;
 
 @property (nonatomic, readonly) BOOL connected;
 @property (nonatomic, copy, readonly, nullable) NSString *deviceName;
@@ -79,9 +90,11 @@ typedef NS_ENUM(NSInteger, SHCAmbientMode) {
 @property (nonatomic, readonly) BOOL multipointEnabled;
 @property (nonatomic, copy, readonly) NSString *multipointDiagnostics; // hex log of the last multipoint reads
 
-// Runs the native Bluetooth device picker (modal, main thread) and connects to the chosen device.
-// completion is called on the main thread.
-- (void)scanAndConnectWithCompletion:(void (^)(BOOL ok, NSString * _Nullable error))completion;
+// Connects to the device with this address (from availableDevices), or with address nil picks one
+// automatically: a connected Sony headset first, then any paired one. If nothing is identified, completion
+// gets ok=NO with needsChoice=YES so the UI can let the user choose. Main thread; completion on main.
+- (void)connectToAddress:(nullable NSString *)address
+              completion:(void (^)(BOOL ok, BOOL needsChoice, NSString * _Nullable error))completion;
 
 - (void)disconnect;
 

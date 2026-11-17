@@ -160,6 +160,21 @@ import SwiftUI
             let connect = actionItem(model.connecting ? "Connecting…" : "Connect Headphones", #selector(connectHeadphones))
             connect.isEnabled = !model.connecting
             menu.addItem(connect)
+            // Every paired device, so a renamed or unrecognised headset can be picked by hand.
+            let chooser = NSMenuItem(title: "Connect To", action: nil, keyEquivalent: "")
+            let submenu = NSMenu()
+            model.reloadAvailableDevices()
+            for device in model.availableDevices {
+                let item = actionItem(device.name, #selector(connectToDevice(_:)))
+                item.representedObject = device.address
+                item.state = device.connected ? .on : .off
+                item.isEnabled = !model.connecting
+                if device.looksLikeSony { item.image = NSImage(systemSymbolName: "headphones", accessibilityDescription: nil) }
+                submenu.addItem(item)
+            }
+            if submenu.items.isEmpty { submenu.addItem(disabledItem("No paired devices")) }
+            chooser.submenu = submenu
+            menu.addItem(chooser)
         }
         menu.addItem(.separator())
         menu.addItem(actionItem("Open SonyBridge", #selector(openWindow)))
@@ -174,6 +189,13 @@ import SwiftUI
     @objc private func connectHeadphones() {
         NSApp.activate(ignoringOtherApps: true)
         model.connect()
+    }
+
+    @objc private func connectToDevice(_ sender: NSMenuItem) {
+        guard let address = sender.representedObject as? String,
+              let device = model.availableDevices.first(where: { $0.address == address }) else { return }
+        NSApp.activate(ignoringOtherApps: true)
+        model.connect(to: device)
     }
 
     private func actionItem(_ title: String, _ action: Selector, key: String = "") -> NSMenuItem {

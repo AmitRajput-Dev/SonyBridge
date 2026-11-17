@@ -7,6 +7,18 @@ import Foundation
 import Combine
 
 private let keepSpeakToChatOffKey = "KeepSpeakToChatOffOnConnect"
+// Address of the device the user last picked in the chooser; preferred by Connect while still paired.
+private let preferredDeviceKey = "PreferredDeviceAddress"
+
+// A device paired with this Mac, as offered by the device chooser.
+struct BluetoothDeviceInfo: Identifiable, Equatable {
+    let name: String
+    let address: String
+    let connected: Bool
+    let looksLikeSony: Bool
+
+    var id: String { address }
+}
 
 struct PairedDeviceInfo: Identifiable, Equatable {
     let name: String
@@ -90,6 +102,11 @@ final class HeadphonesModel: ObservableObject {
 
     @Published var errorMessage: String?
 
+    // In-app device chooser: every device paired with this Mac, so a renamed or unrecognised
+    // headset can still be picked by hand.
+    @Published var showDeviceChooser = false
+    @Published var availableDevices: [BluetoothDeviceInfo] = []
+
     private var pollTimer: Timer?
     private var dynamicTimer: Timer?
 
@@ -106,19 +123,51 @@ final class HeadphonesModel: ObservableObject {
     // confirmed, so the off-on-connect enforcement fires at most once per connection.
     private var s2cAutoDisablePending = false
 
+    // Connects to the device last picked in the chooser if it is still paired, else auto-detects a Sony
+    // headset; if none is found, opens the chooser instead of failing.
     func connect() {
+        let preferred = UserDefaults.standard.string(forKey: preferredDeviceKey)
+        let stillPaired = preferred.map { address in
+            HeadphonesBridge.availableDevices().contains { $0.address == address }
+        } ?? false
+        connect(address: stillPaired ? preferred : nil)
+    }
+
+    // Connects to a device picked in the chooser and remembers it for the next Connect.
+    func connect(to device: BluetoothDeviceInfo) {
+        UserDefaults.standard.set(device.address, forKey: preferredDeviceKey)
+        showDeviceChooser = false
+        connect(address: device.address)
+    }
+
+    func openDeviceChooser() {
+        reloadAvailableDevices()
+        errorMessage = nil
+        showDeviceChooser = true
+    }
+
+    func reloadAvailableDevices() {
+        availableDevices = HeadphonesBridge.availableDevices().map {
+            BluetoothDeviceInfo(name: $0.name, address: $0.address, connected: $0.connected, looksLikeSony: $0.looksLikeSony)
+        }
+    }
+
+    private func connect(address: String?) {
         connecting = true
         errorMessage = nil
-        // Defer so SwiftUI can render the "Connecting…" state before the modal picker blocks the main thread.
+        // Defer so SwiftUI can render the "Connecting…" state before the connect blocks the main thread.
         DispatchQueue.main.async {
-            self.bridge.scanAndConnect { ok, error in
+            self.bridge.connect(toAddress: address) { ok, needsChoice, error in
                 self.connecting = false
                 if ok {
+                    self.showDeviceChooser = false
                     self.s2cAutoDisablePending = true
                     self.syncFromBridge()
                     self.startWatchingConnection()
                     self.refreshStatus()
                     self.startDynamicPolling()
+                } else if needsChoice {
+                    self.openDeviceChooser()
                 } else if let error = error {
                     self.errorMessage = error
                 }
