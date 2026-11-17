@@ -7,6 +7,18 @@ import Foundation
 import Combine
 
 private let keepSpeakToChatOffKey = "KeepSpeakToChatOffOnConnect"
+// Address of the device the user last picked in the chooser; preferred by Connect while still paired.
+private let preferredDeviceKey = "PreferredDeviceAddress"
+
+// A device paired with this Mac, as offered by the device chooser.
+struct BluetoothDeviceInfo: Identifiable, Equatable {
+    let name: String
+    let address: String
+    let connected: Bool
+    let looksLikeSony: Bool
+
+    var id: String { address }
+}
 
 struct PairedDeviceInfo: Identifiable, Equatable {
     let name: String
@@ -29,6 +41,17 @@ final class HeadphonesModel: ObservableObject {
     @Published var connected = false
     @Published var connecting = false
     @Published var deviceName = ""
+    // Model the headset reported (only asked for when the macOS name doesn't name one, i.e. a renamed headset).
+    @Published var modelName = ""
+    // Name to look up per-model assets (product image) by: the reported model, else the macOS name.
+    var productName: String { modelName.isEmpty ? deviceName : modelName }
+    // Shown under the name only when the headset is renamed, i.e. its model differs from the macOS name.
+    var modelSubtitle: String? {
+        let model = modelName.trimmingCharacters(in: .whitespaces)
+        let name = deviceName.trimmingCharacters(in: .whitespaces)
+        guard !model.isEmpty, model.caseInsensitiveCompare(name) != .orderedSame else { return nil }
+        return model
+    }
     @Published var supportsVpt = false
     @Published var maxAmbientLevel = 20
 
@@ -90,6 +113,11 @@ final class HeadphonesModel: ObservableObject {
 
     @Published var errorMessage: String?
 
+    // In-app device chooser: every device paired with this Mac, so a renamed or unrecognised
+    // headset can still be picked by hand.
+    @Published var showDeviceChooser = false
+    @Published var availableDevices: [BluetoothDeviceInfo] = []
+
     private var pollTimer: Timer?
     private var dynamicTimer: Timer?
 
@@ -106,19 +134,51 @@ final class HeadphonesModel: ObservableObject {
     // confirmed, so the off-on-connect enforcement fires at most once per connection.
     private var s2cAutoDisablePending = false
 
+    // Connects to the device last picked in the chooser if it is still paired, else auto-detects a Sony
+    // headset; if none is found, opens the chooser instead of failing.
     func connect() {
+        let preferred = UserDefaults.standard.string(forKey: preferredDeviceKey)
+        let stillPaired = preferred.map { address in
+            HeadphonesBridge.availableDevices().contains { $0.address == address }
+        } ?? false
+        connect(address: stillPaired ? preferred : nil)
+    }
+
+    // Connects to a device picked in the chooser and remembers it for the next Connect.
+    func connect(to device: BluetoothDeviceInfo) {
+        UserDefaults.standard.set(device.address, forKey: preferredDeviceKey)
+        showDeviceChooser = false
+        connect(address: device.address)
+    }
+
+    func openDeviceChooser() {
+        reloadAvailableDevices()
+        errorMessage = nil
+        showDeviceChooser = true
+    }
+
+    func reloadAvailableDevices() {
+        availableDevices = HeadphonesBridge.availableDevices().map {
+            BluetoothDeviceInfo(name: $0.name, address: $0.address, connected: $0.connected, looksLikeSony: $0.looksLikeSony)
+        }
+    }
+
+    private func connect(address: String?) {
         connecting = true
         errorMessage = nil
-        // Defer so SwiftUI can render the "Connecting…" state before the modal picker blocks the main thread.
+        // Defer so SwiftUI can render the "Connecting…" state before the connect blocks the main thread.
         DispatchQueue.main.async {
-            self.bridge.scanAndConnect { ok, error in
+            self.bridge.connect(toAddress: address) { ok, needsChoice, error in
                 self.connecting = false
                 if ok {
+                    self.showDeviceChooser = false
                     self.s2cAutoDisablePending = true
                     self.syncFromBridge()
                     self.startWatchingConnection()
                     self.refreshStatus()
                     self.startDynamicPolling()
+                } else if needsChoice {
+                    self.openDeviceChooser()
                 } else if let error = error {
                     self.errorMessage = error
                 }
@@ -139,6 +199,7 @@ final class HeadphonesModel: ObservableObject {
             self.hasAutoPowerOff = self.bridge.hasAutoPowerOff
             self.autoPowerOff = self.bridge.autoPowerOff
             self.firmware = self.bridge.firmware ?? ""
+            self.modelName = self.bridge.modelName ?? ""
             self.codec = self.bridge.codec ?? ""
             self.hasSpeakToChat = self.bridge.hasSpeakToChat
             self.speakToChat = self.bridge.speakToChat
@@ -346,6 +407,7 @@ final class HeadphonesModel: ObservableObject {
         bridge.disconnect()
         connected = false
         deviceName = ""
+        modelName = ""
         syncMultipointFromBridge()
     }
 
@@ -358,6 +420,7 @@ final class HeadphonesModel: ObservableObject {
             if self.connected && !self.bridge.connected {
                 self.connected = false
                 self.deviceName = ""
+                self.modelName = ""
                 self.errorMessage = "Headphones disconnected."
                 self.stopWatchingConnection()
                 self.stopDynamicPolling()
