@@ -133,12 +133,19 @@ struct ContentView: View {
             // copyrighted and can't be bundled) over the theme's backdrop, mirroring Sony's app layout.
             ZStack {
                 HeroBackdrop()
-                ProductImage(deviceName: model.deviceName, size: 190)
+                ProductImage(deviceName: model.productName, size: 190)
             }
 
-            Text(model.deviceName)
-                .font(.system(size: 24, weight: .bold))
-                .foregroundColor(palette.primary)
+            VStack(spacing: 2) {
+                Text(model.deviceName)
+                    .font(.system(size: 24, weight: .bold))
+                    .foregroundColor(palette.primary)
+                if let subtitle = model.modelSubtitle {
+                    Text(subtitle)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(palette.secondary)
+                }
+            }
 
             StatusChips(model: model)
         }

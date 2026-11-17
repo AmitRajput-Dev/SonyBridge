@@ -164,6 +164,11 @@ static NSString *SHCNormalizedAddress(NSString *address) {
 - (BOOL)hasAutoPowerOff { return _hp && _hp->hasAutoPowerOff(); }
 - (NSInteger)autoPowerOff { return _hp ? _hp->getAutoPowerOff() : 0; }
 - (BOOL)hasFirmware { return _hp && _hp->hasFirmware(); }
+- (nullable NSString *)modelName {
+    if (!_hp) return nil;
+    std::string model = _hp->getModelName();
+    return model.empty() ? nil : @(model.c_str());
+}
 - (nullable NSString *)firmware { return _hp ? @(_hp->getFirmware().c_str()) : nil; }
 - (BOOL)hasCodec { return _hp && _hp->hasCodec(); }
 - (nullable NSString *)codec { return _hp ? @(_hp->getCodec().c_str()) : nil; }
@@ -333,6 +338,12 @@ static BOOL SHCLooksLikeSonyHeadset(IOBluetoothDevice *device) {
         // essential for v1: 0x22 powers off an XM4 but requests battery state on v2.
         if (!self->_initialized.load()) {
             try { hp->initDevice(); self->_initialized = true; } catch (std::exception &exc) {}
+        }
+        // A renamed headset ("Alemanyo 🎧") hides its model from the name-based checks (earbud battery layout,
+        // XM6 layouts, product image), so ask it for its model before anything depends on it. Skipped when the
+        // macOS name already names a model, so unrenamed headsets send exactly what they did before.
+        if (hp->getModelName().empty() && !SHCNameLooksLikeSony(self->_deviceName)) {
+            try { hp->requestModelName(); } catch (std::exception &exc) {}
         }
         try { hp->requestAmbientState(); } catch (std::exception &exc) {}
         try { hp->requestBattery(); } catch (std::exception &exc) {}

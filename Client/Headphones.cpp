@@ -107,17 +107,24 @@ void Headphones::setDeviceName(const std::string& name)
 // True for Sony's true-wireless earbuds, which report a battery per earbud instead of one for the
 // whole device. Only used to pick the probe order - an unrecognised name still finds both layouts,
 // just one timed-out inquiry slower.
+std::string Headphones::_nameForModelChecks() const
+{
+	std::lock_guard guard(this->_propertyMtx);
+	const std::string& source = this->_modelName.empty() ? this->_deviceName : this->_modelName;
+	std::string name;
+	for (char c : source) name.push_back((char)std::tolower((unsigned char)c));
+	return name;
+}
+
 bool Headphones::_looksLikeEarbuds() const
 {
-	std::string name;
-	for (char c : this->_deviceName) name.push_back((char)std::tolower((unsigned char)c));
+	std::string name = this->_nameForModelChecks();
 	return name.find("wf-") != std::string::npos || name.find("linkbuds") != std::string::npos;
 }
 
 bool Headphones::_isWh1000Xm6() const
 {
-	std::string name;
-	for (char c : this->_deviceName) name.push_back((char)std::tolower((unsigned char)c));
+	std::string name = this->_nameForModelChecks();
 	return name.find("wh-1000xm6") != std::string::npos || name.find("wh1000xm6") != std::string::npos;
 }
 
@@ -411,7 +418,7 @@ int Headphones::getEqualizerBandCount()
 
 bool Headphones::isTenBandEqualizer()
 {
-	std::lock_guard guard(this->_propertyMtx);
+	// No lock here: _isWh1000Xm6() takes _propertyMtx itself.
 	return this->_conn.getProtocolVersion() == SonyProtocolVersion::V2 && this->_isWh1000Xm6();
 }
 
@@ -621,6 +628,27 @@ void Headphones::setAutoPowerOff(int index)
 	std::lock_guard guard(this->_propertyMtx);
 	this->_autoPowerOff = index;
 }
+
+void Headphones::requestModelName()
+{
+	const bool isV1 = this->_conn.getProtocolVersion() == SonyProtocolVersion::V1;
+	auto r = isV1
+		? this->_conn.sendCommandAndReadResponse({ (char)V1Command::FW_GET, (char)V1Command::INFO_MODEL_NAME }, V1Command::FW_RET, V1Command::INFO_MODEL_NAME)
+		: this->_conn.sendCommandAndReadResponse({ (char)V2Command::FW_GET, (char)V2Command::INFO_MODEL_NAME }, V2Command::FW_RET, V2Command::INFO_MODEL_NAME);
+	// Reply: 05 01 <len> <ascii...>. Keep printable ASCII only, so stray padding can't break the lookups.
+	if (r.size() <= 3) throw std::runtime_error("Invalid model name response");
+	std::string model;
+	for (auto it = r.begin() + 3; it != r.end(); ++it) {
+		unsigned char c = (unsigned char)*it;
+		if (c >= 0x20 && c < 0x7f) model.push_back((char)c);
+	}
+	while (!model.empty() && model.back() == ' ') model.pop_back();
+	if (model.empty()) throw std::runtime_error("Empty model name response");
+	std::lock_guard guard(this->_propertyMtx);
+	this->_modelName = model;
+}
+
+std::string Headphones::getModelName() { std::lock_guard guard(this->_propertyMtx); return this->_modelName; }
 
 bool Headphones::hasFirmware() { std::lock_guard guard(this->_propertyMtx); return this->_hasFirmware; }
 std::string Headphones::getFirmware() { std::lock_guard guard(this->_propertyMtx); return this->_firmware; }

@@ -41,6 +41,9 @@ typedef NS_ENUM(NSInteger, SHCAmbientMode) {
 @property (nonatomic, copy, readonly, nullable) NSString *deviceName;
 @property (nonatomic, copy, readonly, nullable) NSString *deviceMac;
 @property (nonatomic, copy, readonly, nullable) NSString *protocolVersionString; // "v1" / "v2"
+// Model name the headset reported (e.g. "WH-1000XM3"); nil until read. Only asked for when the macOS name
+// doesn't already look like a Sony model, i.e. the headset was renamed in Bluetooth settings.
+@property (nonatomic, copy, readonly, nullable) NSString *modelName;
 
 // Only meaningful while connected.
 @property (nonatomic, readonly) BOOL supportsVpt;        // v1 protocol devices only

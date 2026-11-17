@@ -41,6 +41,17 @@ final class HeadphonesModel: ObservableObject {
     @Published var connected = false
     @Published var connecting = false
     @Published var deviceName = ""
+    // Model the headset reported (only asked for when the macOS name doesn't name one, i.e. a renamed headset).
+    @Published var modelName = ""
+    // Name to look up per-model assets (product image) by: the reported model, else the macOS name.
+    var productName: String { modelName.isEmpty ? deviceName : modelName }
+    // Shown under the name only when the headset is renamed, i.e. its model differs from the macOS name.
+    var modelSubtitle: String? {
+        let model = modelName.trimmingCharacters(in: .whitespaces)
+        let name = deviceName.trimmingCharacters(in: .whitespaces)
+        guard !model.isEmpty, model.caseInsensitiveCompare(name) != .orderedSame else { return nil }
+        return model
+    }
     @Published var supportsVpt = false
     @Published var maxAmbientLevel = 20
 
@@ -188,6 +199,7 @@ final class HeadphonesModel: ObservableObject {
             self.hasAutoPowerOff = self.bridge.hasAutoPowerOff
             self.autoPowerOff = self.bridge.autoPowerOff
             self.firmware = self.bridge.firmware ?? ""
+            self.modelName = self.bridge.modelName ?? ""
             self.codec = self.bridge.codec ?? ""
             self.hasSpeakToChat = self.bridge.hasSpeakToChat
             self.speakToChat = self.bridge.speakToChat
@@ -395,6 +407,7 @@ final class HeadphonesModel: ObservableObject {
         bridge.disconnect()
         connected = false
         deviceName = ""
+        modelName = ""
         syncMultipointFromBridge()
     }
 
@@ -407,6 +420,7 @@ final class HeadphonesModel: ObservableObject {
             if self.connected && !self.bridge.connected {
                 self.connected = false
                 self.deviceName = ""
+                self.modelName = ""
                 self.errorMessage = "Headphones disconnected."
                 self.stopWatchingConnection()
                 self.stopDynamicPolling()
