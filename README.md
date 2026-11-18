@@ -58,8 +58,9 @@ on macOS, and a matching modern UI on Windows/Linux.
 - 🧩 **Capability-gated extras** — Auto Power-Off · Speak-to-Chat · Adaptive Volume (only shown when your device supports them)
 - 🖼️ **Device hero image** — your headphones' official Sony product render
 - 🔄 **Live button sync** — changes made on the headset reflect in the app
-- 🔌 **Auto-connect** to your already-paired Sony headset
+- 🔌 **Auto-connect** to your already-paired Sony headset — found by name or by its Sony control service, so a renamed headset works too; **Choose device…** lets you pick any paired device by hand
 - 🍫 **Menu-bar quick controls** — click the menu-bar icon for mode, ambient level, Focus on Voice, EQ preset, battery and playback pinning without opening the window (right-click for the menu)
+- 🔋 **Menu-bar status** — battery % and the noise-control mode next to the icon; optional **menu-bar-only** mode (no Dock icon), **Open at Login** (macOS 13+) and **Connect on Launch**, all under the icon's right-click menu → Settings
 - ↔️ **Resizable window** — a tall single column by default; widen it past 720pt for a two-column layout
 - 📱 **Multipoint** — see which devices are connected, switch playback between them, pin playback to this Mac, and turn "Connect to 2 devices" on or off
 - 🧬 **Dual-protocol** — auto-detects and speaks either protocol generation

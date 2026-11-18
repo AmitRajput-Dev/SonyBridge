@@ -361,6 +361,40 @@ int main()
 	zeros.requestAmbientState();
 	require(zeros.getAmbientSoundControl() && zeros.getAsmLevel() == 7, "a zeroed 67 17 reply overwrote the state");
 
+	// --- A headset renamed in macOS: the model name it reports (04 01 -> 05 01 <len> <ascii>) drives the
+	// per-model checks instead of the macOS name. ---
+	auto fakeRenamed = std::make_unique<FakeV2Connector>();
+	auto* observedRenamed = fakeRenamed.get();
+	observedRenamed->reply = [](const Buffer& request) -> Buffer {
+		if (request == bytes({ 0x04, 0x01 })) {
+			Buffer r = bytes({ 0x05, 0x01, 0x0a });
+			for (char c : std::string("WH-1000XM6")) r.push_back(c);
+			return r;
+		}
+		if (request == bytes({ 0x66, 0x19 })) return bytes({ 0x67, 0x19, 0x01, 0x01, 0x01, 0x00, 0x0a, 0x00, 0x00 });
+		return {};
+	};
+	BluetoothWrapper bluetoothRenamed(std::move(fakeRenamed));
+	Headphones renamed(bluetoothRenamed);
+	renamed.setDeviceName("Alemanyo \xF0\x9F\x8E\xA7");
+	require(!renamed.isTenBandEqualizer(), "a renamed headset must not look like an XM6 before its model is known");
+	renamed.requestModelName();
+	require(observedRenamed->sent(bytes({ 0x04, 0x01 })), "model name must be requested with 04 01");
+	require(renamed.getModelName() == "WH-1000XM6", "05 01 model name reply was not decoded");
+	require(renamed.isTenBandEqualizer(), "the reported model name must drive the XM6 checks");
+	renamed.requestAmbientState();
+	require(observedRenamed->sent(bytes({ 0x66, 0x19 })), "renamed XM6 noise control must be read via 66 19");
+
+	// A headset that doesn't answer 04 01 keeps the macOS name for the checks.
+	auto fakeSilent = std::make_unique<FakeV2Connector>();
+	BluetoothWrapper bluetoothSilent(std::move(fakeSilent));
+	Headphones silent(bluetoothSilent);
+	silent.setDeviceName("WH-1000XM6");
+	bool threw = false;
+	try { silent.requestModelName(); } catch (...) { threw = true; }
+	require(threw && silent.getModelName().empty(), "an unanswered model name request must throw and leave it empty");
+	require(silent.isTenBandEqualizer(), "without a reported model the macOS name must still drive the checks");
+
 	// Malformed inbound frames on the untrusted parser path must throw the recoverable type.
 	// 61 (0x3D) is the escape sentry; a lone one at buffer end and one followed by a
 	// non-escapable byte are the two unescape rejection paths.

@@ -100,6 +100,12 @@ public:
 
 	bool hasFirmware();
 	std::string getFirmware();
+
+	// Asks the headset for its model name (e.g. "WH-1000XM3"). Once known it replaces the macOS name in
+	// the per-model checks, so a headset renamed in Bluetooth settings is still recognised. Throws if the
+	// device doesn't answer; getModelName() stays empty then.
+	void requestModelName();
+	std::string getModelName();
 	bool hasCodec();
 	std::string getCodec();
 
@@ -160,7 +166,10 @@ private:
 	bool _batteryRightCharging = false;
 	bool _batteryCaseCharging = false;
 	std::string _deviceName;
+	std::string _modelName;
 
+	// Lower-cased model name if the headset reported one, else the macOS device name.
+	std::string _nameForModelChecks() const;
 	bool _looksLikeEarbuds() const;
 	// The WH-1000XM6 speaks a different layout for two v2 commands: noise-control state is read via inquired
 	// type 0x19 (0x17 answers all zeros), and the equalizer uses inquired type 0x04 with 10 raw bands.
@@ -192,7 +201,7 @@ private:
 	std::string _multipointWriteLog;
 	std::string _multipointDiagnostics;
 
-	std::mutex _propertyMtx;
+	mutable std::mutex _propertyMtx;
 
 	BluetoothWrapper& _conn;
 };

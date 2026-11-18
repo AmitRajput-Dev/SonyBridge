@@ -133,12 +133,19 @@ struct ContentView: View {
             // copyrighted and can't be bundled) over the theme's backdrop, mirroring Sony's app layout.
             ZStack {
                 HeroBackdrop()
-                ProductImage(deviceName: model.deviceName, size: 190)
+                ProductImage(deviceName: model.productName, size: 190)
             }
 
-            Text(model.deviceName)
-                .font(.system(size: 24, weight: .bold))
-                .foregroundColor(palette.primary)
+            VStack(spacing: 2) {
+                Text(model.deviceName)
+                    .font(.system(size: 24, weight: .bold))
+                    .foregroundColor(palette.primary)
+                if let subtitle = model.modelSubtitle {
+                    Text(subtitle)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(palette.secondary)
+                }
+            }
 
             StatusChips(model: model)
         }
@@ -749,19 +756,127 @@ struct ConnectButton: View {
 
     var body: some View {
         let palette = theme.palette(colorScheme)
-        // Activate first: from the menu-bar panel the app isn't frontmost, and the device picker the
-        // connect shows would open behind other apps.
-        Button(action: { NSApp.activate(ignoringOtherApps: true); model.connect() }) {
-            Text(model.connecting ? "Connecting…" : "Connect headphones")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(palette.onAccent)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
-                .background(palette.accent)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        VStack(spacing: 10) {
+            if model.showDeviceChooser {
+                DeviceChooser(model: model)
+            } else {
+                // Activate first: from the menu-bar panel the app isn't frontmost.
+                Button(action: { NSApp.activate(ignoringOtherApps: true); model.connect() }) {
+                    Text(model.connecting ? "Connecting…" : "Connect headphones")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(palette.onAccent)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(palette.accent)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .buttonStyle(PlainButtonStyle())
+                .disabled(model.connecting)
+
+                Button(action: { model.openDeviceChooser() }) {
+                    Text("Choose device…")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(palette.accentText)
+                }
+                .buttonStyle(PlainButtonStyle())
+                .disabled(model.connecting)
+            }
+        }
+    }
+}
+
+// Every device paired with this Mac, so a renamed or unrecognised headset can be picked by hand.
+// Likely Sony headsets come first and are marked.
+struct DeviceChooser: View {
+    @ObservedObject var model: HeadphonesModel
+
+    @Environment(\.appTheme) private var theme
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        let palette = theme.palette(colorScheme)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Choose your headphones")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(palette.primary)
+                Spacer()
+                Button(action: { model.reloadAvailableDevices() }) {
+                    Image(systemName: "arrow.clockwise")
+                        .foregroundColor(palette.accentText)
+                }
+                .buttonStyle(PlainButtonStyle())
+                .help("Refresh")
+            }
+
+            if model.availableDevices.isEmpty {
+                Text("No paired Bluetooth devices. Pair your headphones in System Settings → Bluetooth first.")
+                    .font(.system(size: 12))
+                    .foregroundColor(palette.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                ScrollView {
+                    VStack(spacing: 6) {
+                        ForEach(model.availableDevices) { device in
+                            row(device, palette: palette)
+                        }
+                    }
+                }
+                .frame(maxHeight: 240)
+            }
+
+            HStack {
+                Text("Pick the one to control. Non-Sony devices won't respond.")
+                    .font(.system(size: 11))
+                    .foregroundColor(palette.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer()
+                Button(action: { model.showDeviceChooser = false }) {
+                    Text("Cancel")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(palette.accentText)
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+        }
+        .disabled(model.connecting)
+    }
+
+    private func row(_ device: BluetoothDeviceInfo, palette: Palette) -> some View {
+        Button(action: { NSApp.activate(ignoringOtherApps: true); model.connect(to: device) }) {
+            HStack(spacing: 10) {
+                Image(systemName: device.looksLikeSony ? "headphones" : "dot.radiowaves.left.and.right")
+                    .frame(width: 18)
+                    .foregroundColor(device.looksLikeSony ? palette.accentText : palette.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(device.name)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(palette.primary)
+                        .lineLimit(1)
+                    Text(subtitle(device))
+                        .font(.system(size: 11))
+                        .foregroundColor(palette.secondary)
+                }
+                Spacer()
+                if device.connected {
+                    Circle().fill(Color.green).frame(width: 7, height: 7)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(palette.track)
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .contentShape(Rectangle())
         }
         .buttonStyle(PlainButtonStyle())
-        .disabled(model.connecting)
+    }
+
+    private func subtitle(_ device: BluetoothDeviceInfo) -> String {
+        var parts: [String] = []
+        if device.looksLikeSony { parts.append("Sony headset") }
+        parts.append(device.connected ? "Connected" : "Not connected")
+        return parts.joined(separator: " · ")
     }
 }
 

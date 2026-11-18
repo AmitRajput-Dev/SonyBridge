@@ -5,7 +5,53 @@
 
 import AppKit
 import Combine
+import ServiceManagement
 import SwiftUI
+
+// App-level options, set from the status item's right-click menu (reachable even while disconnected).
+enum MenuBarSettings {
+    static let showBatteryKey = "MenuBarShowBattery"
+    static let showModeKey = "MenuBarShowMode"
+    static let menuBarOnlyKey = "MenuBarOnly"
+    static let connectOnLaunchKey = "ConnectOnLaunch"
+
+    private static func bool(_ key: String, default value: Bool) -> Bool {
+        UserDefaults.standard.object(forKey: key) as? Bool ?? value
+    }
+
+    static var showBattery: Bool {
+        get { bool(showBatteryKey, default: true) }
+        set { UserDefaults.standard.set(newValue, forKey: showBatteryKey) }
+    }
+    static var showMode: Bool {
+        get { bool(showModeKey, default: true) }
+        set { UserDefaults.standard.set(newValue, forKey: showModeKey) }
+    }
+    // No Dock icon and no window at launch; the window still opens from the status item, or by launching
+    // the app again (Finder, Spotlight), so it stays reachable if the menu bar hides the status item.
+    static var menuBarOnly: Bool {
+        get { bool(menuBarOnlyKey, default: false) }
+        set { UserDefaults.standard.set(newValue, forKey: menuBarOnlyKey) }
+    }
+    static var connectOnLaunch: Bool {
+        get { bool(connectOnLaunchKey, default: false) }
+        set { UserDefaults.standard.set(newValue, forKey: connectOnLaunchKey) }
+    }
+
+    // Launch at login goes through SMAppService (macOS 13+); the system owns the state, so it is never cached.
+    static var launchAtLoginAvailable: Bool {
+        if #available(macOS 13.0, *) { return true }
+        return false
+    }
+    static var launchAtLogin: Bool {
+        if #available(macOS 13.0, *) { return SMAppService.mainApp.status == .enabled }
+        return false
+    }
+    static func setLaunchAtLogin(_ enabled: Bool) throws {
+        guard #available(macOS 13.0, *) else { return }
+        if enabled { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
+    }
+}
 
 // Installed once from AppDelegate; reads and drives the same HeadphonesModel as the window. The icon shows the
 // playback device next to the headphones (phone, computer, or its multipoint slot number), and the headphones
@@ -24,6 +70,18 @@ import SwiftUI
         // The panel can open before the window has appeared, so don't wait for it to apply the theme.
         AppTheme.stored.applyToApp()
         instance = MenuBarController()
+        if MenuBarSettings.menuBarOnly {
+            applyActivationPolicy()
+            NSApp.windows.filter { $0.contentViewController != nil && !($0 is NSPanel) }.forEach { $0.orderOut(nil) }
+        }
+        if MenuBarSettings.connectOnLaunch {
+            // Next turn, so the window (if shown) can render before the connect pumps the run loop.
+            DispatchQueue.main.async { HeadphonesModel.shared.connectOnLaunchIfPossible() }
+        }
+    }
+
+    private static func applyActivationPolicy() {
+        NSApp.setActivationPolicy(MenuBarSettings.menuBarOnly ? .accessory : .regular)
     }
 
     private override init() {
@@ -38,6 +96,9 @@ import SwiftUI
         if #available(macOS 13.0, *) { panel.sizingOptions = .preferredContentSize }
         popover.contentViewController = panel
         popover.behavior = .transient
+        // Let the panel's background extend under the arrow, so the arrow matches the theme instead of
+        // showing the system material. Earlier systems keep the default arrow.
+        if #available(macOS 14.0, *) { popover.hasFullSizeContent = true }
 
         statusItem.button?.target = self
         statusItem.button?.action = #selector(statusItemClicked(_:))
@@ -64,6 +125,11 @@ import SwiftUI
             if let panel = popover.contentViewController, #unavailable(macOS 13.0) {
                 popover.contentSize = panel.view.fittingSize
             }
+            // A popover takes its appearance from the status item, which follows the menu bar (light over a light
+            // wallpaper), not from the app. The panel is themed dark, so system controls in it (the EQ picker)
+            // then drew their light-mode text with a darkening blend: near-black on black. Use the app's appearance,
+            // set per theme by AppTheme.applyToApp(), so the panel and its controls agree.
+            popover.appearance = NSApp.effectiveAppearance
             popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
             popover.contentViewController?.view.window?.makeKey()
         }
@@ -89,10 +155,38 @@ import SwiftUI
         return "\(device.slot).circle"
     }
 
+    // Noise Cancelling and Ambient Sound get a badge; Off gets none.
+    private func modeSymbol() -> String? {
+        guard model.connected, MenuBarSettings.showMode else { return nil }
+        switch model.mode {
+        case .noiseCanceling: return "waveform.slash"
+        case .ambientSound: return "ear"
+        default: return nil
+        }
+    }
+
+    // The lowest earbud on TWS models (the one that runs out first), else the headset's single level.
+    private func batteryTitle() -> String {
+        guard model.connected, MenuBarSettings.showBattery else { return "" }
+        let level: Int
+        if model.hasDualBattery {
+            level = [model.batteryLeft, model.batteryRight].filter { $0 >= 0 }.min() ?? -1
+        } else {
+            level = model.batteryLevel
+        }
+        return level >= 0 ? "\(level)%" : ""
+    }
+
     private func updateIcon() {
         let base = model.playbackPinnedToThisMac ? "headphones.circle.fill" : "headphones"
         let device = model.playbackDevice
-        statusItem.button?.image = Self.icon(base: base, accessory: device.map(playbackSymbol(for:)))
+        let accessories = [modeSymbol(), device.map(playbackSymbol(for:))].compactMap { $0 }
+        statusItem.button?.image = Self.icon(base: base, accessories: accessories)
+        let title = batteryTitle()
+        statusItem.button?.imagePosition = title.isEmpty ? .imageOnly : .imageLeading
+        statusItem.button?.attributedTitle = NSAttributedString(string: title, attributes: [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize - 1, weight: .regular),
+        ])
         statusItem.button?.appearsDisabled = !model.connected
         if let device = device {
             let name = device.name.isEmpty ? device.address : device.name
@@ -102,26 +196,31 @@ import SwiftUI
         }
     }
 
-    // Draws the headphones symbol with an optional second symbol beside it, as one template image.
-    private static func icon(base: String, accessory: String?) -> NSImage? {
+    // Draws the headphones symbol with any smaller symbols beside it (mode, playback device), as one template image.
+    // A symbol missing on this macOS version is skipped.
+    private static func icon(base: String, accessories: [String]) -> NSImage? {
         let baseConfig = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
         let accessoryConfig = NSImage.SymbolConfiguration(pointSize: 11, weight: .regular)
         guard let baseImage = NSImage(systemSymbolName: base, accessibilityDescription: "SonyBridge")?
             .withSymbolConfiguration(baseConfig) else { return nil }
-        guard let accessory = accessory,
-              let accessoryImage = NSImage(systemSymbolName: accessory, accessibilityDescription: nil)?
-                .withSymbolConfiguration(accessoryConfig) else {
+        let accessoryImages = accessories.compactMap {
+            NSImage(systemSymbolName: $0, accessibilityDescription: nil)?.withSymbolConfiguration(accessoryConfig)
+        }
+        guard !accessoryImages.isEmpty else {
             baseImage.isTemplate = true
             return baseImage
         }
         let spacing: CGFloat = 2
-        let size = NSSize(width: baseImage.size.width + spacing + accessoryImage.size.width,
-                          height: max(baseImage.size.height, accessoryImage.size.height))
+        let images = [baseImage] + accessoryImages
+        let size = NSSize(width: images.map(\.size.width).reduce(0, +) + spacing * CGFloat(accessoryImages.count),
+                          height: images.map(\.size.height).max() ?? 0)
         let image = NSImage(size: size, flipped: false) { _ in
-            baseImage.draw(in: NSRect(x: 0, y: (size.height - baseImage.size.height) / 2,
-                                      width: baseImage.size.width, height: baseImage.size.height))
-            accessoryImage.draw(in: NSRect(x: baseImage.size.width + spacing, y: (size.height - accessoryImage.size.height) / 2,
-                                           width: accessoryImage.size.width, height: accessoryImage.size.height))
+            var x: CGFloat = 0
+            for part in images {
+                part.draw(in: NSRect(x: x, y: (size.height - part.size.height) / 2,
+                                     width: part.size.width, height: part.size.height))
+                x += part.size.width + spacing
+            }
             return true
         }
         image.isTemplate = true
@@ -160,7 +259,24 @@ import SwiftUI
             let connect = actionItem(model.connecting ? "Connecting…" : "Connect Headphones", #selector(connectHeadphones))
             connect.isEnabled = !model.connecting
             menu.addItem(connect)
+            // Every paired device, so a renamed or unrecognised headset can be picked by hand.
+            let chooser = NSMenuItem(title: "Connect To", action: nil, keyEquivalent: "")
+            let submenu = NSMenu()
+            model.reloadAvailableDevices()
+            for device in model.availableDevices {
+                let item = actionItem(device.name, #selector(connectToDevice(_:)))
+                item.representedObject = device.address
+                item.state = device.connected ? .on : .off
+                item.isEnabled = !model.connecting
+                if device.looksLikeSony { item.image = NSImage(systemSymbolName: "headphones", accessibilityDescription: nil) }
+                submenu.addItem(item)
+            }
+            if submenu.items.isEmpty { submenu.addItem(disabledItem("No paired devices")) }
+            chooser.submenu = submenu
+            menu.addItem(chooser)
         }
+        menu.addItem(.separator())
+        menu.addItem(settingsItem())
         menu.addItem(.separator())
         menu.addItem(actionItem("Open SonyBridge", #selector(openWindow)))
         menu.addItem(actionItem("Quit SonyBridge", #selector(quit), key: "q"))
@@ -174,6 +290,61 @@ import SwiftUI
     @objc private func connectHeadphones() {
         NSApp.activate(ignoringOtherApps: true)
         model.connect()
+    }
+
+    @objc private func connectToDevice(_ sender: NSMenuItem) {
+        guard let address = sender.representedObject as? String,
+              let device = model.availableDevices.first(where: { $0.address == address }) else { return }
+        NSApp.activate(ignoringOtherApps: true)
+        model.connect(to: device)
+    }
+
+    private func settingsItem() -> NSMenuItem {
+        let item = NSMenuItem(title: "Settings", action: nil, keyEquivalent: "")
+        let submenu = NSMenu()
+        submenu.autoenablesItems = false
+        func toggle(_ title: String, _ on: Bool, _ action: Selector) {
+            let entry = actionItem(title, action)
+            entry.state = on ? .on : .off
+            submenu.addItem(entry)
+        }
+        toggle("Show Battery in Menu Bar", MenuBarSettings.showBattery, #selector(toggleShowBattery))
+        toggle("Show Noise Control in Menu Bar", MenuBarSettings.showMode, #selector(toggleShowMode))
+        submenu.addItem(.separator())
+        toggle("Menu Bar Only (Hide Dock Icon)", MenuBarSettings.menuBarOnly, #selector(toggleMenuBarOnly))
+        if MenuBarSettings.launchAtLoginAvailable {
+            toggle("Open at Login", MenuBarSettings.launchAtLogin, #selector(toggleLaunchAtLogin))
+        }
+        toggle("Connect on Launch", MenuBarSettings.connectOnLaunch, #selector(toggleConnectOnLaunch))
+        item.submenu = submenu
+        return item
+    }
+
+    @objc private func toggleShowBattery() { MenuBarSettings.showBattery.toggle(); updateIcon() }
+    @objc private func toggleShowMode() { MenuBarSettings.showMode.toggle(); updateIcon() }
+    @objc private func toggleConnectOnLaunch() { MenuBarSettings.connectOnLaunch.toggle() }
+
+    @objc private func toggleMenuBarOnly() {
+        MenuBarSettings.menuBarOnly.toggle()
+        Self.applyActivationPolicy()
+        // Leaving the Dock deactivates the app; keep the window in front if it was open.
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    @objc private func toggleLaunchAtLogin() {
+        let enable = !MenuBarSettings.launchAtLogin
+        do {
+            try MenuBarSettings.setLaunchAtLogin(enable)
+            // Opening at login is only useful if the headphones connect too.
+            if enable { MenuBarSettings.connectOnLaunch = true }
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = enable ? "Couldn't turn on Open at Login" : "Couldn't turn off Open at Login"
+            alert.informativeText = error.localizedDescription
+                + "\n\nYou can also manage it in System Settings → General → Login Items."
+            NSApp.activate(ignoringOtherApps: true)
+            alert.runModal()
+        }
     }
 
     private func actionItem(_ title: String, _ action: Selector, key: String = "") -> NSMenuItem {

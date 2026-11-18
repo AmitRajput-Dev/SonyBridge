@@ -51,12 +51,20 @@ struct QuickControlsView: View {
     @ViewBuilder
     private var connectedContent: some View {
         HStack(spacing: 12) {
-            ProductImage(deviceName: model.deviceName, size: 56)
+            ProductImage(deviceName: model.productName, size: 56)
             VStack(alignment: .leading, spacing: 6) {
-                Text(model.deviceName)
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundColor(palette.primary)
-                    .lineLimit(1)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(model.deviceName)
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundColor(palette.primary)
+                        .lineLimit(1)
+                    if let subtitle = model.modelSubtitle {
+                        Text(subtitle)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(palette.secondary)
+                            .lineLimit(1)
+                    }
+                }
                 StatusChips(model: model, showsMode: false)
             }
         }

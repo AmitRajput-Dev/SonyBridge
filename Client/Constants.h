@@ -37,6 +37,7 @@ namespace V1Command
 	inline constexpr unsigned char INIT_REPLY   = 0x01;
 	inline constexpr unsigned char FW_GET       = 0x04;
 	inline constexpr unsigned char FW_RET       = 0x05;
+	inline constexpr unsigned char INFO_MODEL_NAME = 0x01; // FW_GET sub-type: 04 01 -> RET 05 01 <len> <ascii model>
 	inline constexpr unsigned char BATTERY_GET  = 0x10;
 	inline constexpr unsigned char BATTERY_RET  = 0x11;
 	inline constexpr unsigned char CODEC_GET    = 0x18;
@@ -97,6 +98,7 @@ namespace V2Command
 	inline constexpr unsigned char DSEE_SET     = 0xe8; // payload: e8 01 <enabled 0/1>
 	inline constexpr unsigned char FW_GET       = 0x04; // payload: 04 02  -> RET 05 02 <ascii version...>
 	inline constexpr unsigned char FW_RET       = 0x05;
+	inline constexpr unsigned char INFO_MODEL_NAME = 0x01; // FW_GET sub-type: 04 01 -> RET 05 01 <len> <ascii model>
 	inline constexpr unsigned char CODEC_GET    = 0x12; // payload: 12 02  -> RET 13 02 <codec>
 	inline constexpr unsigned char CODEC_RET    = 0x13;
 	inline constexpr unsigned char APO_GET      = 0x26; // auto power off. GET 26 05 -> RET 27 05 <c0> <c1>
