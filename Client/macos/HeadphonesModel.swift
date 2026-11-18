@@ -144,6 +144,18 @@ final class HeadphonesModel: ObservableObject {
         connect(address: stillPaired ? preferred : nil)
     }
 
+    // Connects once at launch, without any UI, if a headset is already connected to this Mac: the last device
+    // picked in the chooser, else a recognised Sony headset. Does nothing otherwise, so a launch at login with
+    // the headphones off neither waits on a timeout nor opens the chooser.
+    func connectOnLaunchIfPossible() {
+        guard !connected, !connecting else { return }
+        let devices = HeadphonesBridge.availableDevices().filter { $0.connected }
+        let preferred = UserDefaults.standard.string(forKey: preferredDeviceKey)
+        guard let device = devices.first(where: { $0.address == preferred }) ?? devices.first(where: { $0.looksLikeSony })
+        else { return }
+        connect(address: device.address)
+    }
+
     // Connects to a device picked in the chooser and remembers it for the next Connect.
     func connect(to device: BluetoothDeviceInfo) {
         UserDefaults.standard.set(device.address, forKey: preferredDeviceKey)

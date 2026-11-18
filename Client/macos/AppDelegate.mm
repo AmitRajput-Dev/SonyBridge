@@ -25,6 +25,8 @@
         return NO;
     }
     else {
+        // In menu-bar-only mode the app isn't active, so bring it forward with the window.
+        [NSApp activateIgnoringOtherApps:YES];
         [_window makeKeyAndOrderFront:self];
         return YES;
     }
